@@ -167,6 +167,7 @@ def load_samples(
             for alt in ['ground_truth_rescaled.pt', 'ground_truth_original.pt', 'ground_truth.pt']:
                 alt_path = outputs_old_dir / alt
                 if alt_path.exists():
+                    print(f"  Loading ground truth from: {alt_path}")
                     data = torch.load(alt_path, weights_only=False)
                     if isinstance(data, dict):
                         for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
@@ -204,11 +205,13 @@ def load_samples(
         if ground_truth_fallback and project_root:
             fallback_path = project_root / ground_truth_fallback
             if fallback_path.exists():
+                print(f"  Loading ground truth from fallback: {fallback_path}")
                 if fallback_path.suffix == '.csv':
                     # Load CSV (e.g., AEMET data)
                     import pandas as pd
                     df = pd.read_csv(fallback_path, index_col=0)
                     data = torch.tensor(df.values, dtype=torch.float32)
+                    print(f"  CSV data shape: {data.shape}")
                     return data
                 else:
                     data = torch.load(fallback_path, weights_only=False)
@@ -247,8 +250,8 @@ def load_samples(
 def plot_1d_sample(ax, sample: torch.Tensor, title: str, color: str = 'blue'):
     """Plot a 1D time series sample."""
     sample = sample.cpu().numpy()
-    if sample.ndim > 1:
-        sample = sample.squeeze()
+    # Squeeze all extra dimensions: (1, T), (1, 1, T), etc. -> (T,)
+    sample = sample.squeeze()
     
     x = np.linspace(0, 1, len(sample))
     ax.plot(x, sample, color=color, linewidth=1.5, alpha=0.9)
@@ -268,7 +271,7 @@ def plot_1d_samples_multi(ax, samples: torch.Tensor, title: str, color: str = 'b
     ----------
     ax : matplotlib axis
     samples : torch.Tensor
-        Tensor of shape (N, T) where N is number of samples, T is time steps
+        Tensor of shape (N, T) or (N, 1, T) where N is number of samples, T is time steps
     title : str
         Plot title
     color : str
@@ -279,6 +282,9 @@ def plot_1d_samples_multi(ax, samples: torch.Tensor, title: str, color: str = 'b
         Transparency for individual lines
     """
     samples = samples.cpu().numpy()
+    # Handle 3D tensors with channel dimension: (N, C, T) -> (N, T)
+    if samples.ndim == 3:
+        samples = samples.squeeze(1)
     if samples.ndim == 1:
         samples = samples.reshape(1, -1)
     
@@ -421,8 +427,13 @@ def create_sample_comparison_figure(
             print(f"Warning: Could not load samples for {method_name}")
             samples[method_name] = None
     
-    # Create figure
-    fig, axes = plt.subplots(3, 2, figsize=(8, 10))
+    # Create figure - use 2x3 for 2D data, 3x2 for 1D data
+    if data_is_2d:
+        fig, axes = plt.subplots(2, 3, figsize=(12, 7))
+        n_cols = 3
+    else:
+        fig, axes = plt.subplots(3, 2, figsize=(8, 10))
+        n_cols = 2
     
     # Colors for plots
     colors = {
@@ -437,8 +448,8 @@ def create_sample_comparison_figure(
     
     # Plot each method
     for idx, method_name in enumerate(plot_order):
-        row = idx // 2
-        col = idx % 2
+        row = idx // n_cols
+        col = idx % n_cols
         ax = axes[row, col]
         
         sample = samples.get(method_name)
