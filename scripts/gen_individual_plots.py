@@ -567,17 +567,22 @@ def process_dataset(dataset_key: str, outputs_dir: Path, plots_output_dir: Path,
     )
     
     # Create spectrum MSE plot (if data available)
+    # Use spectrum_mse_log for PDE datasets (log scale is more appropriate for energy spectra)
+    is_pde = dataset_key in PDE_DATASETS
+    spectrum_key = 'spectrum_mse_log' if is_pde else 'spectrum_mse'
+    spectrum_label = 'Spectrum MSE (log)' if is_pde else 'Spectrum MSE'
+    
     has_spectrum = any(
-        best_configs[cat]['metrics'].get('spectrum_mse') is not None 
+        best_configs[cat]['metrics'].get(spectrum_key) is not None 
         for cat in best_configs
     )
     if has_spectrum:
-        spectrum_output = plots_output_dir / f"{dataset_key}_spectrum_mse.png"
+        spectrum_output = plots_output_dir / f"{dataset_key}_{spectrum_key}.png"
         create_single_metric_bar_plot(
             best_configs=best_configs,
             dataset_name=dataset_info['title'],
-            metric_key='spectrum_mse',
-            metric_label='Spectrum MSE',
+            metric_key=spectrum_key,
+            metric_label=spectrum_label,
             output_path=spectrum_output,
             color='#9E9AC8',  # Soft purple
             lower_is_better=True
@@ -833,15 +838,15 @@ def generate_combined_plot(outputs_dir: Path = None, plots_output_dir: Path = No
 BASELINE_MODELS = ['DDPM', 'NCSN', 'FFM', 'k-FFM']
 BASELINE_COLORS = ['#E41A1C', '#377EB8', '#4DAF4A', '#984EA3']  # Red, Blue, Green, Purple
 
-BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 'autocorrelation_mse']
-BASELINE_LABELS_SEQ = ['Mean', 'Variance', 'Skewness', 'Kurtosis', 'Autocorr.']
+BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'autocorrelation_mse']
+BASELINE_LABELS_SEQ = ['Mean', 'Variance', 'Autocorr.']
 
-BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse']
-BASELINE_LABELS_PDE = ['Mean', 'Variance', 'Spectrum']
+BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse_log']
+BASELINE_LABELS_PDE = ['Mean', 'Variance', 'Spectrum (log)']
 
 # Dataset groups for baseline comparison
-SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi', 'moGP']
-PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'ginzburg_landau', 'stochastic_ns']
+SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi']
+PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'stochastic_ns']
 
 
 def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Dict]:
@@ -942,13 +947,28 @@ def generate_baseline_comparison_plot(
 ):
     """Generate baseline comparison bar plot across datasets."""
     
+    # Abbreviations for dataset names
+    DATASET_ABBREVIATIONS = {
+        'Navier-Stokes': 'NS',
+        'Stochastic KdV': 'Sto. KdV',
+        'Stochastic NS': 'Sto. NS',
+        '\\shortstack{Navier-\\\\Stokes}': 'NS',
+        '\\shortstack{Stoch.\\\\KdV}': 'Sto. KdV',
+        '\\shortstack{Stoch.\\\\NS}': 'Sto. NS',
+        'Gene Expr.': 'Gene',
+    }
+    
+    def abbreviate_title(title: str) -> str:
+        """Abbreviate dataset title for plotting."""
+        return DATASET_ABBREVIATIONS.get(title, title)
+    
     # Collect data from all datasets
     all_data = {}
     for dataset_key in dataset_keys:
         data = get_baseline_models_data(dataset_key, outputs_dir)
         if data:
             all_data[dataset_key] = {
-                'title': DATASETS[dataset_key]['title'],
+                'title': abbreviate_title(DATASETS[dataset_key]['title']),
                 'models': data
             }
     
@@ -959,7 +979,10 @@ def generate_baseline_comparison_plot(
     n_datasets = len(all_data)
     n_metrics = len(metrics)
     
-    fig, axes = plt.subplots(1, n_metrics, figsize=(4 * n_metrics, 5))
+    # Vertical layout (n_metrics x 1) for better presentation in double-column paper
+    fig_width = 7  # Single column width
+    fig_height = 3.2 * n_metrics  # Height per subplot
+    fig, axes = plt.subplots(n_metrics, 1, figsize=(fig_width, fig_height))
     if n_metrics == 1:
         axes = [axes]
     
@@ -970,9 +993,27 @@ def generate_baseline_comparison_plot(
     for ax_idx, (metric, label) in enumerate(zip(metrics, metric_labels)):
         ax = axes[ax_idx]
         
+        # First, compute ranks for each dataset
+        dataset_keys_list = list(all_data.keys())
+        ranks_per_dataset = {}  # {dataset_key: {model: rank}}
+        
+        for dataset_key in dataset_keys_list:
+            models_data = all_data[dataset_key]['models']
+            # Get values for all models
+            model_values = []
+            for model in BASELINE_MODELS:
+                if model in models_data:
+                    val = models_data[model].get(metric)
+                    if val is not None:
+                        model_values.append((model, val))
+            # Sort by value (lower is better for MSE)
+            model_values.sort(key=lambda x: x[1])
+            ranks_per_dataset[dataset_key] = {m: rank + 1 for rank, (m, _) in enumerate(model_values)}
+        
+        # Now plot bars with rank annotations
         for model_idx, model in enumerate(BASELINE_MODELS):
             values = []
-            for dataset_key in all_data.keys():
+            for dataset_key in dataset_keys_list:
                 models = all_data[dataset_key]['models']
                 if model in models:
                     val = models[model].get(metric)
@@ -984,25 +1025,45 @@ def generate_baseline_comparison_plot(
             bars = ax.bar(x + offset, values, bar_width, 
                          label=model, color=BASELINE_COLORS[model_idx],
                          alpha=0.85, edgecolor='white', linewidth=0.5)
+            
+            # Add rank annotations (just number, no #)
+            for bar, dataset_key in zip(bars, dataset_keys_list):
+                if not np.isnan(bar.get_height()):
+                    rank = ranks_per_dataset.get(dataset_key, {}).get(model)
+                    if rank:
+                        ax.annotate(f'{rank}',
+                                   xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                                   xytext=(0, 2), textcoords='offset points',
+                                   ha='center', va='bottom', fontsize=9, fontweight='bold',
+                                   color='#333333')
         
-        ax.set_ylabel(f'{label} MSE')
-        ax.set_xlabel('Dataset')
+        ax.set_ylabel(f'{label} MSE', fontsize=11)
         ax.set_xticks(x)
-        ax.set_xticklabels(dataset_titles, rotation=30, ha='right', fontsize=9)
+        ax.set_xticklabels(dataset_titles, rotation=0, ha='center', fontsize=10)
         ax.set_yscale('log')
         ax.grid(True, alpha=0.3, linestyle='--', color='gray')
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.set_title(label, fontsize=11, fontweight='bold')
+        ax.set_title(label, fontsize=12, fontweight='bold')
+        ax.tick_params(axis='y', labelsize=10)
+        
+        # Extend y-axis to make room for rank labels
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(ymin * 0.8, ymax * 3)
+        
+        # Only show x-label on bottom subplot
+        if ax_idx < n_metrics - 1:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xlabel('Dataset', fontsize=11)
     
-    # Add single legend at the bottom
+    # Add single legend at top of first subplot
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower center', ncol=len(BASELINE_MODELS),
-              bbox_to_anchor=(0.5, -0.02), fontsize=10, frameon=False)
+    axes[0].legend(handles, labels, loc='upper right', ncol=4,
+                   fontsize=9, frameon=True, framealpha=0.9)
     
-    plt.suptitle(title, fontsize=13, fontweight='bold', y=1.02)
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.2)
+    plt.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')

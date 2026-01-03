@@ -102,8 +102,9 @@ METRICS_SEQUENCE = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 
 METRIC_HEADERS_SEQUENCE = ['Mean', 'Variance', 'Kurtosis', 'Skewness', 'Autocorr.', 'Conv. Rate']
 
 # PDE datasets: no autocorrelation, kurtosis, or skewness (not applicable/meaningful for 2D fields)
-METRICS_PDE = ['mean_mse', 'variance_mse', 'convergence_rate', 'spectrum_mse']
-METRIC_HEADERS_PDE = ['Mean', 'Variance', 'Conv. Rate', 'Spectrum']
+# Use spectrum_mse_log for PDE datasets (log scale is more appropriate for energy spectra)
+METRICS_PDE = ['mean_mse', 'variance_mse', 'convergence_rate', 'spectrum_mse_log']
+METRIC_HEADERS_PDE = ['Mean', 'Variance', 'Conv. Rate', 'Spectrum (log)']
 
 # Default for backwards compatibility
 METRICS = METRICS_ALL
@@ -182,8 +183,8 @@ DATASETS = {
 }
 
 # Dataset groups
-SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi', 'moGP']
-PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'ginzburg_landau', 'stochastic_ns']
+SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi']
+PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'stochastic_ns']
 
 
 def normalize_configs(configs) -> Dict:
@@ -819,8 +820,8 @@ BASELINE_MODELS = ['DDPM', 'NCSN']
 BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 'autocorrelation_mse']
 BASELINE_HEADERS_SEQ = ['Mean', 'Var.', 'Skew.', 'Kurt.', 'Autocorr.']
 
-BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse']
-BASELINE_HEADERS_PDE = ['Mean', 'Variance', 'Spectrum']
+BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse_log']
+BASELINE_HEADERS_PDE = ['Mean', 'Variance', 'Spectrum (log)']
 
 
 def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Dict]:

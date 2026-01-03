@@ -514,8 +514,16 @@ def run_all_experiments() -> Dict[str, Dict[int, Dict]]:
     return all_results
 
 
-def load_all_results(include_baselines: bool = True) -> Dict[str, Dict[int, Dict]]:
-    """Load all results from saved files instead of training."""
+def load_all_results(include_baselines: bool = True, compute_missing_spectrum: bool = True) -> Dict[str, Dict[int, Dict]]:
+    """Load all results from saved files instead of training.
+    
+    Parameters
+    ----------
+    include_baselines : bool
+        Include DDPM/NCSN baseline configurations
+    compute_missing_spectrum : bool
+        If True, compute spectrum MSE on-the-fly for configs that don't have it
+    """
     from util.ot_monitoring import TrainingMetrics
     print("Loading saved results from", spath)
     
@@ -524,6 +532,14 @@ def load_all_results(include_baselines: bool = True) -> Dict[str, Dict[int, Dict
     all_configs = dict(OT_CONFIGS)
     if include_baselines:
         all_configs.update(BASELINE_CONFIGS)
+    
+    # Load ground truth for spectrum computation
+    gt_for_spectrum = None
+    if compute_missing_spectrum:
+        gt_path = spath / 'ground_truth.pt'
+        if gt_path.exists():
+            gt_for_spectrum = torch.load(gt_path, weights_only=True)
+            print(f"  Loaded ground truth for spectrum computation: {gt_for_spectrum.shape}")
     
     for config_name in all_configs.keys():
         config_dir = spath / config_name
@@ -549,6 +565,21 @@ def load_all_results(include_baselines: bool = True) -> Dict[str, Dict[int, Dict
             quality_metrics = None
             if (seed_dir / 'quality_metrics.json').exists():
                 quality_metrics = GenerationQualityMetrics.load(seed_dir / 'quality_metrics.json')
+            
+            # Compute spectrum on-the-fly if missing
+            if (samples is not None and quality_metrics is not None and 
+                compute_missing_spectrum and gt_for_spectrum is not None and
+                quality_metrics.spectrum_mse is None):
+                try:
+                    n_samples = samples.shape[0]
+                    gt_subset = gt_for_spectrum[:n_samples]
+                    quality_metrics.spectrum_mse = spectrum_mse_2d(gt_subset, samples, log_scale=False)
+                    quality_metrics.spectrum_mse_log = spectrum_mse_2d(gt_subset, samples, log_scale=True)
+                    print(f"    Computed spectrum MSE for {config_name}/seed_{seed}: {quality_metrics.spectrum_mse:.4e}")
+                    # Optionally save updated metrics
+                    quality_metrics.save(seed_dir / 'quality_metrics.json')
+                except Exception as e:
+                    print(f"    Warning: Could not compute spectrum for {config_name}/seed_{seed}: {e}")
             
             if samples is not None and quality_metrics is not None:
                 config_results[seed] = {
