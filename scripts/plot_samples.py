@@ -32,6 +32,8 @@ DATASETS = {
         'dir': 'AEMET_ot_comprehensive',
         'title': 'AEMET Temperature',
         'is_2d': False,
+        # Ground truth may be in different location
+        'ground_truth_fallback': 'data/aemet.csv',  # Original CSV data
     },
     'expr_genes': {
         'dir': 'expr_genes_ot_comprehensive',
@@ -106,6 +108,7 @@ def load_samples(
     data_file: Optional[str] = None,
     project_root: Optional[Path] = None,
     samples_file: str = 'samples.pt',
+    ground_truth_fallback: Optional[str] = None,
 ) -> Optional[torch.Tensor]:
     """Load samples for a given method.
     
@@ -125,6 +128,8 @@ def load_samples(
         Project root directory
     samples_file : str
         Name of the samples file (default: 'samples.pt', can be 'samples_original.pt')
+    ground_truth_fallback : str, optional
+        Fallback path for ground truth (can be CSV or PT file)
     """
     if config_options is None:
         # Ground truth - try multiple sources
@@ -156,7 +161,23 @@ def load_samples(
                             return v
                 return data
         
-        # 3. Try loading from original data file (for Heston, rBergomi, etc.)
+        # 3. Try outputs-old directory as fallback
+        if project_root:
+            outputs_old_dir = project_root / 'outputs-old' / dataset_dir.name
+            for alt in ['ground_truth_rescaled.pt', 'ground_truth_original.pt', 'ground_truth.pt']:
+                alt_path = outputs_old_dir / alt
+                if alt_path.exists():
+                    data = torch.load(alt_path, weights_only=False)
+                    if isinstance(data, dict):
+                        for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                            if key in data and isinstance(data[key], torch.Tensor):
+                                return data[key]
+                        for v in data.values():
+                            if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                                return v
+                    return data
+        
+        # 4. Try loading from original data file (for Heston, rBergomi, etc.)
         if data_file and project_root:
             data_path = project_root / data_file
             if data_path.exists():
@@ -178,6 +199,27 @@ def load_samples(
                         if isinstance(v, torch.Tensor) and v.ndim >= 2:
                             return v
                 return data
+        
+        # 5. Try ground_truth_fallback (can be CSV for AEMET)
+        if ground_truth_fallback and project_root:
+            fallback_path = project_root / ground_truth_fallback
+            if fallback_path.exists():
+                if fallback_path.suffix == '.csv':
+                    # Load CSV (e.g., AEMET data)
+                    import pandas as pd
+                    df = pd.read_csv(fallback_path, index_col=0)
+                    data = torch.tensor(df.values, dtype=torch.float32)
+                    return data
+                else:
+                    data = torch.load(fallback_path, weights_only=False)
+                    if isinstance(data, dict):
+                        for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                            if key in data and isinstance(data[key], torch.Tensor):
+                                return data[key]
+                        for v in data.values():
+                            if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                                return v
+                    return data
         
         return None
     
@@ -337,6 +379,8 @@ def create_sample_comparison_figure(
     data_file = dataset_info.get('data_file', None)
     # Get samples file name (default: samples.pt, can be samples_original.pt)
     samples_file = dataset_info.get('samples_file', 'samples.pt')
+    # Get ground truth fallback path (for datasets like AEMET)
+    ground_truth_fallback = dataset_info.get('ground_truth_fallback', None)
     
     # Load samples for each method
     samples = {}
@@ -345,7 +389,8 @@ def create_sample_comparison_figure(
         sample_data = load_samples(
             dataset_dir, method_name, config_options, seed,
             data_file=data_file, project_root=project_root,
-            samples_file=samples_file
+            samples_file=samples_file,
+            ground_truth_fallback=ground_truth_fallback
         )
         if sample_data is not None:
             # Handle case where sample_data might still be a dict
@@ -478,6 +523,7 @@ def create_multi_sample_comparison_figure(
     # Get data file and samples file
     data_file = dataset_info.get('data_file', None)
     samples_file = dataset_info.get('samples_file', 'samples.pt')
+    ground_truth_fallback = dataset_info.get('ground_truth_fallback', None)
     
     # Load ALL samples for each method (not just one)
     all_samples = {}
@@ -486,7 +532,8 @@ def create_multi_sample_comparison_figure(
         sample_data = load_samples(
             dataset_dir, method_name, config_options, seed,
             data_file=data_file, project_root=project_root,
-            samples_file=samples_file
+            samples_file=samples_file,
+            ground_truth_fallback=ground_truth_fallback
         )
         if sample_data is not None:
             # Handle case where sample_data might still be a dict
