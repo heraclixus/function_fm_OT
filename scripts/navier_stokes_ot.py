@@ -48,6 +48,7 @@ from util.eval import (
     compare_convergence_simplified,
     print_convergence_table,
     save_all_metrics_summary,
+    spectrum_mse_2d,
 )
 
 from functional_fm_ot import FFMModelOT
@@ -353,6 +354,15 @@ def train_single_config(
     quality_metrics.mean_mse = float(((gt_flat.mean(0) - samples_flat.mean(0))**2).mean())
     quality_metrics.variance_mse = float(((gt_flat.var(0) - samples_flat.var(0))**2).mean())
     
+    # Compute 2D spectrum MSE (use original 2D format, not flattened)
+    try:
+        quality_metrics.spectrum_mse = spectrum_mse_2d(ground_truth[:n_gen_samples], samples, log_scale=False)
+        quality_metrics.spectrum_mse_log = spectrum_mse_2d(ground_truth[:n_gen_samples], samples, log_scale=True)
+    except Exception as e:
+        print(f"    Warning: Could not compute 2D spectrum MSE: {e}")
+        quality_metrics.spectrum_mse = None
+        quality_metrics.spectrum_mse_log = None
+    
     if training_metrics is not None:
         if training_metrics.train_losses:
             quality_metrics.final_train_loss = training_metrics.train_losses[-1]
@@ -434,6 +444,13 @@ def train_baseline_config(
     )
     quality_metrics.compute_from_samples(gt_flat, samples_flat)
     quality_metrics.total_train_time = train_time
+    
+    # Compute 2D spectrum MSE (use original 2D format)
+    try:
+        quality_metrics.spectrum_mse = spectrum_mse_2d(ground_truth[:n_gen_samples], samples, log_scale=False)
+        quality_metrics.spectrum_mse_log = spectrum_mse_2d(ground_truth[:n_gen_samples], samples, log_scale=True)
+    except Exception as e:
+        print(f"    Warning: Could not compute 2D spectrum MSE: {e}")
     
     torch.save(samples, save_dir / 'samples.pt')
     torch.save(model.state_dict(), save_dir / 'model.pt')
@@ -567,6 +584,7 @@ def aggregate_results(all_results: Dict) -> Dict[str, Dict]:
         metrics_to_average = [
             'mean_mse', 'variance_mse', 'final_train_loss',
             'total_train_time', 'convergence_rate', 'final_stability',
+            'spectrum_mse', 'spectrum_mse_log',
         ]
         
         for attr in metrics_to_average:
@@ -649,6 +667,8 @@ def create_summary_report(aggregated: Dict, save_path: Path):
             'quality_metrics': {
                 'mean_mse': float(q.mean_mse) if q.mean_mse is not None else None,
                 'variance_mse': float(q.variance_mse) if q.variance_mse is not None else None,
+                'spectrum_mse': float(q.spectrum_mse) if q.spectrum_mse is not None else None,
+                'convergence_rate': float(q.convergence_rate) if q.convergence_rate is not None else None,
             },
             'training_metrics': {
                 'final_train_loss': float(q.final_train_loss) if q.final_train_loss is not None else None,

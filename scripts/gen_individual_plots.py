@@ -1,0 +1,1253 @@
+#!/usr/bin/env python3
+"""
+Generate individual bar plots showing best performance per kernel category
+for time series datasets (AEMET, expr_genes, Heston, rBergomi).
+"""
+
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+
+def compute_convergence_rate(train_losses: List[float]) -> Optional[float]:
+    """
+    Compute convergence rate from training loss history.
+    
+    Convergence rate = (log(loss_0) - log(loss_half)) / half_epochs
+    
+    Higher values indicate faster convergence.
+    """
+    if not train_losses or len(train_losses) < 2:
+        return None
+    
+    losses = np.array(train_losses)
+    n_epochs = len(losses)
+    half_idx = max(1, n_epochs // 2)
+    
+    if losses[0] > 0 and losses[half_idx] > 0:
+        return float((np.log(losses[0]) - np.log(losses[half_idx])) / half_idx)
+    else:
+        return float((losses[0] - losses[half_idx]) / half_idx)
+
+
+def compute_convergence_for_config(config_dir: Path, seeds: List[int] = [1, 2, 4]) -> Optional[float]:
+    """
+    Compute average convergence rate for a config across seeds.
+    Looks for training_metrics.json files in seed subdirectories.
+    """
+    convergence_rates = []
+    
+    for seed in seeds:
+        seed_dir = config_dir / f'seed_{seed}'
+        training_file = seed_dir / 'training_metrics.json'
+        
+        if training_file.exists():
+            try:
+                with open(training_file, 'r') as f:
+                    training_data = json.load(f)
+                
+                train_losses = training_data.get('train_losses', [])
+                if train_losses:
+                    rate = compute_convergence_rate(train_losses)
+                    if rate is not None:
+                        convergence_rates.append(rate)
+            except (json.JSONDecodeError, KeyError):
+                continue
+    
+    if convergence_rates:
+        return float(np.mean(convergence_rates))
+    return None
+
+
+# Define kernel categories and their prefixes
+KERNEL_CATEGORIES_ALL = {
+    'Signature': ['signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0'],
+    'RBF': ['rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0'],
+    'Euclidean': ['euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0'],
+    'Gaussian': ['gaussian_ot'],
+    'Independent': ['independent'],
+}
+
+# Default: use all kernel categories
+KERNEL_CATEGORIES = KERNEL_CATEGORIES_ALL.copy()
+
+
+def get_kernel_categories(ignore_gaussian: bool = True) -> Dict:
+    """Get kernel categories, optionally filtering out Gaussian."""
+    if ignore_gaussian:
+        return {k: v for k, v in KERNEL_CATEGORIES_ALL.items() if k != 'Gaussian'}
+    return KERNEL_CATEGORIES_ALL.copy()
+
+# Metrics to plot (excluding skewness and density per user request)
+METRICS = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'autocorrelation_mse']
+METRIC_LABELS = ['Mean', 'Variance', 'Kurtosis', 'Autocorrelation']
+
+# Color palette - soft, aesthetic pastels with good contrast
+COLORS = ['#6BAED6', '#FC8D62', '#8DA0CB', '#66C2A5']  # Soft blue, coral, lavender, mint
+
+# Dataset configurations
+# summary_files is a list of files to try in order (first found is used)
+DATASETS = {
+    # Time series datasets
+    'AEMET': {
+        'dir': 'AEMET_ot_comprehensive',
+        'title': 'AEMET',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'expr_genes': {
+        'dir': 'expr_genes_ot_comprehensive', 
+        'title': 'Gene Expression',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'Heston': {
+        'dir': 'Heston_ot_kappa1.0',
+        'title': 'Heston',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'rBergomi': {
+        'dir': 'rBergomi_ot_H0p10',
+        'title': 'rBergomi',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'econ1': {
+        'dir': 'econ_ot_comprehensive/econ1_population',
+        'title': 'Economy',
+        'summary_files': ['comprehensive_metrics.json'],
+    },
+    'moGP': {
+        'dir': 'moGP_ot_comprehensive',
+        'title': 'Multi-output GP',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    # PDE datasets
+    'kdv': {
+        'dir': 'kdv_ot',
+        'title': 'KdV',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'ginzburg_landau': {
+        'dir': 'ginzburg_landau_ot',
+        'title': 'Ginzburg-Landau',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'navier_stokes': {
+        'dir': 'navier_stokes_ot',
+        'title': 'Navier-Stokes',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'stochastic_kdv': {
+        'dir': 'stochastic_kdv_ot',
+        'title': 'Stochastic KdV',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+    'stochastic_ns': {
+        'dir': 'stochastic_ns_ot',
+        'title': 'Stochastic NS',
+        'summary_files': ['comprehensive_metrics.json', 'experiment_summary.json'],
+    },
+}
+
+
+def load_experiment_summary(output_dir: Path) -> Optional[Dict]:
+    """Load the experiment summary JSON file."""
+    summary_file = output_dir / 'experiment_summary.json'
+    if summary_file.exists():
+        with open(summary_file, 'r') as f:
+            return json.load(f)
+    
+    # Try comprehensive_metrics.json as fallback
+    comprehensive_file = output_dir / 'comprehensive_metrics.json'
+    if comprehensive_file.exists():
+        with open(comprehensive_file, 'r') as f:
+            return json.load(f)
+    
+    return None
+
+
+def normalize_configs(configs) -> Dict:
+    """
+    Normalize configs to a dict format.
+    Handles both dict format (experiment_summary.json) and list format (comprehensive_metrics.json).
+    """
+    if isinstance(configs, dict):
+        return configs
+    elif isinstance(configs, list):
+        # Convert list format to dict format
+        # Each item has 'config_name' field, possibly with prefix like 'econ1_population_'
+        normalized = {}
+        for item in configs:
+            config_name = item.get('config_name', '')
+            # Remove common prefixes (e.g., 'econ1_population_independent' -> 'independent')
+            for prefix in ['econ1_population_', 'econ2_population_', 'econ3_population_']:
+                if config_name.startswith(prefix):
+                    config_name = config_name[len(prefix):]
+                    break
+            normalized[config_name] = item
+        return normalized
+    return {}
+
+
+def get_best_config_per_category(configs, categories: Dict = KERNEL_CATEGORIES) -> Dict:
+    """
+    Find the best performing configuration for each kernel category.
+    Best is determined by lowest average MSE across all metrics.
+    
+    Returns dict mapping category name -> best config data
+    """
+    # Normalize configs to dict format
+    configs = normalize_configs(configs)
+    
+    best_per_category = {}
+    
+    for category_name, config_names in categories.items():
+        best_config = None
+        best_avg_mse = float('inf')
+        
+        for config_name in config_names:
+            if config_name in configs:
+                config_data = configs[config_name]
+                
+                # Get quality metrics
+                if 'quality_metrics' in config_data:
+                    metrics = config_data['quality_metrics']
+                else:
+                    # Config itself contains the metrics directly
+                    metrics = config_data
+                
+                # Compute average MSE across the metrics we care about
+                mse_values = []
+                for metric in METRICS:
+                    if metric in metrics and metrics[metric] is not None:
+                        mse_values.append(metrics[metric])
+                
+                if mse_values:
+                    avg_mse = np.mean(mse_values)
+                    if avg_mse < best_avg_mse:
+                        best_avg_mse = avg_mse
+                        best_config = {
+                            'name': config_name,
+                            'metrics': metrics
+                        }
+        
+        if best_config:
+            best_per_category[category_name] = best_config
+    
+    return best_per_category
+
+
+def compute_ranks(best_configs: Dict, metrics: List[str] = METRICS) -> Dict[str, Dict[str, int]]:
+    """
+    Compute the rank of each category for each metric.
+    Rank 1 = lowest MSE (best), higher rank = worse.
+    
+    Returns dict: {metric: {category: rank}}
+    """
+    categories = list(best_configs.keys())
+    ranks = {metric: {} for metric in metrics}
+    
+    for metric in metrics:
+        # Get values for all categories (skip None values)
+        values = []
+        for category in categories:
+            config_data = best_configs[category]
+            metric_data = config_data['metrics']
+            val = metric_data.get(metric)
+            if val is not None:
+                values.append((category, val))
+        
+        # Sort by value (ascending - lower is better)
+        sorted_values = sorted(values, key=lambda x: x[1])
+        
+        # Assign ranks
+        for rank, (category, _) in enumerate(sorted_values, start=1):
+            ranks[metric][category] = rank
+    
+    return ranks
+
+
+def create_grouped_bar_plot(
+    best_configs: Dict,
+    dataset_name: str,
+    output_path: Path,
+    figsize: Tuple[float, float] = (10, 6)
+):
+    """
+    Create a grouped bar plot showing MSE values for each metric across kernel categories.
+    Displays rank labels on top of each bar.
+    
+    Args:
+        best_configs: Dict mapping category name -> best config data
+        dataset_name: Name of the dataset for the title
+        output_path: Path to save the figure
+        figsize: Figure size
+    """
+    # Setup
+    categories = list(best_configs.keys())
+    n_categories = len(categories)
+    n_metrics = len(METRICS)
+    
+    # Compute ranks for each metric
+    ranks = compute_ranks(best_configs)
+    
+    # Bar positions
+    x = np.arange(n_categories)
+    bar_width = 0.18
+    
+    # Create figure with extra space at bottom for legend
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Collect all values to determine y-axis range
+    all_values = []
+    
+    # Plot bars for each metric
+    for i, (metric, label) in enumerate(zip(METRICS, METRIC_LABELS)):
+        values = []
+        for category in categories:
+            config_data = best_configs[category]
+            metrics_data = config_data['metrics']
+            val = metrics_data.get(metric)
+            # Use a small positive value for None/0 to work with log scale
+            values.append(val if val is not None and val > 0 else np.nan)
+        
+        # Only add valid values for y-axis range calculation
+        all_values.extend([v for v in values if not np.isnan(v)])
+        
+        offset = (i - n_metrics / 2 + 0.5) * bar_width
+        bars = ax.bar(x + offset, values, bar_width, label=label, color=COLORS[i], 
+                     edgecolor='white', linewidth=0.8)
+        
+        # Add rank labels on top of each bar
+        for j, (bar, category) in enumerate(zip(bars, categories)):
+            # Only add rank if category has this metric
+            if category in ranks[metric]:
+                rank = ranks[metric][category]
+                height = bar.get_height()
+                if not np.isnan(height):
+                    ax.annotate(
+                        f'#{rank}',
+                        xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3),  # 3 points vertical offset
+                        textcoords="offset points",
+                        ha='center', va='bottom',
+                        fontsize=8, fontweight='bold',
+                        color='#444444'
+                    )
+    
+    # Extend y-axis upper limit to give room for rank labels
+    if all_values:
+        max_val = max(all_values)
+        min_val = min(all_values)
+        ax.set_ylim(min_val * 0.5, max_val * 5)  # Extra headroom in log scale
+    
+    # Formatting
+    ax.set_xlabel('Kernel Category', fontsize=12, fontweight='medium')
+    ax.set_ylabel('MSE', fontsize=12, fontweight='medium')
+    ax.set_title(f'Average MSE for Statistics for {dataset_name}', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories, fontsize=11)
+    ax.set_yscale('log')
+    
+    # Legend - place below the plot
+    ax.legend(
+        loc='upper center', 
+        bbox_to_anchor=(0.5, -0.12),
+        ncol=4, 
+        fontsize=10, 
+        framealpha=0.95,
+        edgecolor='#cccccc',
+        fancybox=True
+    )
+    
+    # Grid
+    ax.yaxis.grid(True, linestyle='--', alpha=0.4, color='#888888')
+    ax.set_axisbelow(True)
+    
+    # Remove top and right spines for cleaner look
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Tight layout with room for legend
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.18)
+    
+    # Save
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"  Saved: {output_path}")
+    print(f"  Saved: {output_path.with_suffix('.pdf')}")
+
+
+def create_single_metric_bar_plot(
+    best_configs: Dict,
+    dataset_name: str,
+    metric_key: str,
+    metric_label: str,
+    output_path: Path,
+    color: str = '#6BAED6',
+    figsize: Tuple[float, float] = (8, 5),
+    lower_is_better: bool = True
+):
+    """
+    Create a bar plot for a single metric across kernel categories.
+    Displays rank labels on top of each bar.
+    
+    Args:
+        best_configs: Dict mapping category name -> best config data
+        dataset_name: Name of the dataset for the title
+        metric_key: Key of the metric to plot (e.g., 'spectrum_mse')
+        metric_label: Display label for the metric
+        output_path: Path to save the figure
+        color: Bar color
+        figsize: Figure size
+        lower_is_better: If True, rank 1 = lowest value; if False, rank 1 = highest
+    """
+    # Setup
+    categories = list(best_configs.keys())
+    n_categories = len(categories)
+    
+    # Get values for all categories
+    values = []
+    for category in categories:
+        config_data = best_configs[category]
+        metrics = config_data['metrics']
+        val = metrics.get(metric_key, None)
+        values.append(val if val is not None else 0)
+    
+    # Check if we have valid data
+    valid_values = [v for v in values if v is not None and v > 0]
+    if not valid_values:
+        print(f"  Warning: No valid data for metric '{metric_key}'")
+        return
+    
+    # Compute ranks
+    indexed_values = [(i, v) for i, v in enumerate(values) if v is not None and v > 0]
+    if lower_is_better:
+        sorted_indexed = sorted(indexed_values, key=lambda x: x[1])
+    else:
+        sorted_indexed = sorted(indexed_values, key=lambda x: x[1], reverse=True)
+    
+    ranks = {}
+    for rank, (idx, _) in enumerate(sorted_indexed, start=1):
+        ranks[idx] = rank
+    
+    # Bar positions
+    x = np.arange(n_categories)
+    bar_width = 0.6
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot bars
+    bars = ax.bar(x, values, bar_width, color=color, edgecolor='white', linewidth=0.8)
+    
+    # Add rank labels on top of each bar
+    for i, bar in enumerate(bars):
+        if i in ranks:
+            rank = ranks[i]
+            height = bar.get_height()
+            ax.annotate(
+                f'#{rank}',
+                xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha='center', va='bottom',
+                fontsize=10, fontweight='bold',
+                color='#444444'
+            )
+    
+    # Extend y-axis for rank labels
+    if valid_values:
+        max_val = max(valid_values)
+        min_val = min(valid_values)
+        ax.set_ylim(min_val * 0.3, max_val * 4)
+    
+    # Formatting
+    ax.set_xlabel('Kernel Category', fontsize=12, fontweight='medium')
+    ax.set_ylabel(metric_label, fontsize=12, fontweight='medium')
+    ax.set_title(f'{metric_label} for {dataset_name}', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories, fontsize=11)
+    ax.set_yscale('log')
+    
+    # Grid
+    ax.yaxis.grid(True, linestyle='--', alpha=0.4, color='#888888')
+    ax.set_axisbelow(True)
+    
+    # Remove top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    
+    # Save
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"  Saved: {output_path}")
+    print(f"  Saved: {output_path.with_suffix('.pdf')}")
+
+
+def process_dataset(dataset_key: str, outputs_dir: Path, plots_output_dir: Path, ignore_gaussian: bool = True):
+    """Process a single dataset and generate its plot."""
+    dataset_info = DATASETS[dataset_key]
+    dataset_dir = outputs_dir / dataset_info['dir']
+    
+    if not dataset_dir.exists():
+        print(f"  Warning: Directory not found: {dataset_dir}")
+        return False
+    
+    # Load experiment summary - try files in order from summary_files list
+    summary = None
+    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+    
+    for summary_file in summary_files:
+        summary_path = dataset_dir / summary_file
+        if summary_path.exists():
+            with open(summary_path, 'r') as f:
+                summary = json.load(f)
+            print(f"  Using: {summary_file}")
+            break
+    
+    if summary is None:
+        print(f"  Warning: No experiment summary found in {dataset_dir}")
+        return False
+    
+    # Get configs dict - check for nested config key (e.g., econ1_population)
+    config_key = dataset_info.get('config_key', None)
+    if config_key:
+        if config_key in summary:
+            configs = summary[config_key]
+        else:
+            print(f"  Warning: Config key '{config_key}' not found in summary")
+            return False
+    elif 'configs' in summary:
+        configs = summary['configs']
+    else:
+        print(f"  Warning: No 'configs' key found in summary")
+        return False
+    
+    # Find best config per category (with optional Gaussian filtering)
+    categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
+    best_configs = get_best_config_per_category(configs, categories=categories)
+    
+    if not best_configs:
+        print(f"  Warning: No valid configurations found")
+        return False
+    
+    # Fill in missing convergence rates by computing from training_metrics.json
+    for category, config_data in best_configs.items():
+        metrics = config_data.get('metrics', {})
+        if metrics.get('convergence_rate') is None:
+            config_name = config_data.get('name', '')
+            config_subdir = dataset_dir / config_name
+            if config_subdir.exists():
+                conv_rate = compute_convergence_for_config(config_subdir)
+                if conv_rate is not None:
+                    metrics['convergence_rate'] = conv_rate
+                    print(f"  Computed convergence_rate for {category}: {conv_rate:.4f}")
+    
+    # Print which configs were selected
+    print(f"  Best configs per category:")
+    for category, data in best_configs.items():
+        print(f"    {category}: {data['name']}")
+    
+    # Create main statistics plot
+    output_filename = f"{dataset_key}_category_comparison.png"
+    output_path = plots_output_dir / output_filename
+    
+    create_grouped_bar_plot(
+        best_configs=best_configs,
+        dataset_name=dataset_info['title'],
+        output_path=output_path
+    )
+    
+    # Create spectrum MSE plot (if data available)
+    has_spectrum = any(
+        best_configs[cat]['metrics'].get('spectrum_mse') is not None 
+        for cat in best_configs
+    )
+    if has_spectrum:
+        spectrum_output = plots_output_dir / f"{dataset_key}_spectrum_mse.png"
+        create_single_metric_bar_plot(
+            best_configs=best_configs,
+            dataset_name=dataset_info['title'],
+            metric_key='spectrum_mse',
+            metric_label='Spectrum MSE',
+            output_path=spectrum_output,
+            color='#9E9AC8',  # Soft purple
+            lower_is_better=True
+        )
+    
+    # Create convergence rate plot (if data available)
+    has_convergence = any(
+        best_configs[cat]['metrics'].get('convergence_rate') is not None 
+        for cat in best_configs
+    )
+    if has_convergence:
+        convergence_output = plots_output_dir / f"{dataset_key}_convergence_rate.png"
+        create_single_metric_bar_plot(
+            best_configs=best_configs,
+            dataset_name=dataset_info['title'],
+            metric_key='convergence_rate',
+            metric_label='Convergence Rate',
+            output_path=convergence_output,
+            color='#74C476',  # Soft green
+            lower_is_better=False  # Higher convergence rate is better (faster convergence)
+        )
+    
+    return True
+
+
+def generate_all_plots(outputs_dir: Path = None, plots_output_dir: Path = None, ignore_gaussian: bool = True):
+    """Generate plots for all time series datasets."""
+    # Default paths
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    print("=" * 60)
+    print("Generating Individual Category Comparison Plots")
+    if ignore_gaussian:
+        print("(Ignoring Gaussian kernel category)")
+    print("=" * 60)
+    
+    for dataset_key in DATASETS:
+        print(f"\nProcessing {dataset_key}...")
+        success = process_dataset(dataset_key, outputs_dir, plots_output_dir, ignore_gaussian=ignore_gaussian)
+        if success:
+            print(f"  ✓ Successfully generated plot for {dataset_key}")
+        else:
+            print(f"  ✗ Failed to generate plot for {dataset_key}")
+    
+    print("\n" + "=" * 60)
+    print("Done!")
+    print("=" * 60)
+
+
+def generate_single_plot(
+    dataset_key: str,
+    outputs_dir: Path = None,
+    plots_output_dir: Path = None,
+    ignore_gaussian: bool = True
+):
+    """Generate plot for a single dataset."""
+    if dataset_key not in DATASETS:
+        print(f"Error: Unknown dataset '{dataset_key}'")
+        print(f"Available datasets: {list(DATASETS.keys())}")
+        return
+    
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    print(f"Generating plot for {dataset_key}...")
+    success = process_dataset(dataset_key, outputs_dir, plots_output_dir, ignore_gaussian=ignore_gaussian)
+    if success:
+        print(f"✓ Successfully generated plot for {dataset_key}")
+    else:
+        print(f"✗ Failed to generate plot for {dataset_key}")
+
+
+def generate_combined_plot(outputs_dir: Path = None, plots_output_dir: Path = None, ignore_gaussian: bool = True):
+    """Generate a single figure with all datasets as subplots."""
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    # Get kernel categories (with optional Gaussian filtering)
+    categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
+    
+    # Collect data from all datasets
+    all_data = {}
+    for dataset_key in DATASETS:
+        dataset_info = DATASETS[dataset_key]
+        dataset_dir = outputs_dir / dataset_info['dir']
+        
+        if not dataset_dir.exists():
+            continue
+        
+        # Try files in order from summary_files list
+        summary = None
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                break
+        
+        if summary is None:
+            continue
+        
+        # Handle nested config key
+        config_key = dataset_info.get('config_key', None)
+        if config_key:
+            if config_key not in summary:
+                continue
+            configs = summary[config_key]
+        elif 'configs' in summary:
+            configs = summary['configs']
+        else:
+            continue
+        
+        best_configs = get_best_config_per_category(configs, categories=categories)
+        if best_configs:
+            # Fill in missing convergence rates
+            for category, config_data in best_configs.items():
+                metrics = config_data.get('metrics', {})
+                if metrics.get('convergence_rate') is None:
+                    config_name = config_data.get('name', '')
+                    config_subdir = dataset_dir / config_name
+                    if config_subdir.exists():
+                        conv_rate = compute_convergence_for_config(config_subdir)
+                        if conv_rate is not None:
+                            metrics['convergence_rate'] = conv_rate
+            
+            all_data[dataset_key] = {
+                'title': dataset_info['title'],
+                'best_configs': best_configs
+            }
+    
+    if not all_data:
+        print("No data found for any dataset")
+        return
+    
+    # Create 2x2 subplot figure
+    n_datasets = len(all_data)
+    n_cols = 2
+    n_rows = (n_datasets + 1) // 2
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 5 * n_rows))
+    axes = axes.flatten() if n_datasets > 1 else [axes]
+    
+    for idx, (dataset_key, data) in enumerate(all_data.items()):
+        ax = axes[idx]
+        best_configs = data['best_configs']
+        categories = list(best_configs.keys())
+        n_categories = len(categories)
+        n_metrics = len(METRICS)
+        
+        # Compute ranks for this dataset
+        ranks = compute_ranks(best_configs)
+        
+        x = np.arange(n_categories)
+        bar_width = 0.18
+        
+        all_values = []
+        
+        for i, (metric, label) in enumerate(zip(METRICS, METRIC_LABELS)):
+            values = []
+            for category in categories:
+                config_data = best_configs[category]
+                metrics_data = config_data['metrics']
+                val = metrics_data.get(metric)
+                values.append(val if val is not None and val > 0 else np.nan)
+            
+            all_values.extend([v for v in values if not np.isnan(v)])
+            
+            offset = (i - n_metrics / 2 + 0.5) * bar_width
+            bars = ax.bar(x + offset, values, bar_width, label=label, color=COLORS[i],
+                   edgecolor='white', linewidth=0.8)
+            
+            # Add rank labels on top of each bar
+            for j, (bar, category) in enumerate(zip(bars, categories)):
+                if category not in ranks[metric]:
+                    continue
+                rank = ranks[metric][category]
+                height = bar.get_height()
+                if np.isnan(height):
+                    continue
+                ax.annotate(
+                    f'#{rank}',
+                    xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 2),  # 2 points vertical offset
+                    textcoords="offset points",
+                    ha='center', va='bottom',
+                    fontsize=6, fontweight='bold',
+                    color='#444444'
+                )
+        
+        # Extend y-axis for rank labels
+        if all_values:
+            max_val = max(all_values)
+            min_val = min(all_values)
+            ax.set_ylim(min_val * 0.5, max_val * 5)
+        
+        ax.set_xlabel('Kernel Category', fontsize=11)
+        ax.set_ylabel('MSE', fontsize=11)
+        ax.set_title(f'Average MSE for Statistics for {data["title"]}', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories, fontsize=10, rotation=15, ha='right')
+        ax.set_yscale('log')
+        ax.yaxis.grid(True, linestyle='--', alpha=0.4, color='#888888')
+        ax.set_axisbelow(True)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        if idx == 0:
+            ax.legend(
+                loc='upper center',
+                bbox_to_anchor=(1.1, -0.15),
+                ncol=4,
+                fontsize=9,
+                framealpha=0.95,
+                edgecolor='#cccccc',
+                fancybox=True
+            )
+    
+    # Hide unused axes
+    for idx in range(len(all_data), len(axes)):
+        axes[idx].set_visible(False)
+    
+    plt.tight_layout()
+    
+    output_path = plots_output_dir / 'all_datasets_category_comparison.png'
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Saved combined plot: {output_path}")
+    print(f"Saved combined plot: {output_path.with_suffix('.pdf')}")
+
+
+# =============================================================================
+# Baseline Comparison Plots (DDPM, NCSN, FFM, k-FFM)
+# =============================================================================
+
+# Baseline model configurations
+BASELINE_MODELS = ['DDPM', 'NCSN', 'FFM', 'k-FFM']
+BASELINE_COLORS = ['#E41A1C', '#377EB8', '#4DAF4A', '#984EA3']  # Red, Blue, Green, Purple
+
+BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 'autocorrelation_mse']
+BASELINE_LABELS_SEQ = ['Mean', 'Variance', 'Skewness', 'Kurtosis', 'Autocorr.']
+
+BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse']
+BASELINE_LABELS_PDE = ['Mean', 'Variance', 'Spectrum']
+
+# Dataset groups for baseline comparison
+SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi', 'moGP']
+PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'ginzburg_landau', 'stochastic_ns']
+
+
+def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Dict]:
+    """Get metrics for baseline models (DDPM, NCSN, FFM, k-FFM) for a dataset."""
+    dataset_info = DATASETS.get(dataset_key)
+    if not dataset_info:
+        return None
+    
+    dataset_dir = outputs_dir / dataset_info['dir']
+    if not dataset_dir.exists():
+        return None
+    
+    # Load experiment summary
+    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+    summary = None
+    for summary_file in summary_files:
+        summary_path = dataset_dir / summary_file
+        if summary_path.exists():
+            with open(summary_path, 'r') as f:
+                summary = json.load(f)
+            break
+    
+    if not summary:
+        return None
+    
+    # Get configs
+    config_key = dataset_info.get('config_key', None)
+    if config_key:
+        if config_key not in summary:
+            return None
+        configs = summary[config_key]
+    elif 'configs' in summary:
+        configs = summary['configs']
+    else:
+        return None
+    
+    configs = normalize_configs(configs)
+    
+    result = {}
+    
+    # Get DDPM and NCSN baselines
+    for model in ['DDPM', 'NCSN']:
+        if model in configs:
+            config_data = configs[model]
+            if 'quality_metrics' in config_data:
+                result[model] = config_data['quality_metrics']
+            else:
+                result[model] = config_data
+    
+    # Get FFM (independent coupling)
+    if 'independent' in configs:
+        config_data = configs['independent']
+        if 'quality_metrics' in config_data:
+            result['FFM'] = config_data['quality_metrics']
+        else:
+            result['FFM'] = config_data
+    
+    # Get k-FFM (best across all OT kernel types)
+    ot_categories = {
+        'Signature': ['signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0'],
+        'RBF': ['rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0'],
+        'Euclidean': ['euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0'],
+    }
+    
+    best_ot_config = None
+    best_ot_avg_mse = float('inf')
+    core_metrics = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse']
+    
+    for category_name, config_names in ot_categories.items():
+        for config_name in config_names:
+            if config_name in configs:
+                config_data = configs[config_name]
+                if 'quality_metrics' in config_data:
+                    metrics = config_data['quality_metrics']
+                else:
+                    metrics = config_data
+                
+                mse_values = [metrics.get(m) for m in core_metrics if metrics.get(m) is not None]
+                if mse_values:
+                    avg_mse = np.mean(mse_values)
+                    if avg_mse < best_ot_avg_mse:
+                        best_ot_avg_mse = avg_mse
+                        best_ot_config = metrics
+    
+    if best_ot_config:
+        result['k-FFM'] = best_ot_config
+    
+    return result if result else None
+
+
+def generate_baseline_comparison_plot(
+    dataset_keys: List[str],
+    metrics: List[str],
+    metric_labels: List[str],
+    title: str,
+    output_path: Path,
+    outputs_dir: Path
+):
+    """Generate baseline comparison bar plot across datasets."""
+    
+    # Collect data from all datasets
+    all_data = {}
+    for dataset_key in dataset_keys:
+        data = get_baseline_models_data(dataset_key, outputs_dir)
+        if data:
+            all_data[dataset_key] = {
+                'title': DATASETS[dataset_key]['title'],
+                'models': data
+            }
+    
+    if not all_data:
+        print(f"No baseline data found for plot: {output_path}")
+        return
+    
+    n_datasets = len(all_data)
+    n_metrics = len(metrics)
+    
+    fig, axes = plt.subplots(1, n_metrics, figsize=(4 * n_metrics, 5))
+    if n_metrics == 1:
+        axes = [axes]
+    
+    dataset_titles = [all_data[k]['title'] for k in all_data.keys()]
+    x = np.arange(n_datasets)
+    bar_width = 0.18
+    
+    for ax_idx, (metric, label) in enumerate(zip(metrics, metric_labels)):
+        ax = axes[ax_idx]
+        
+        for model_idx, model in enumerate(BASELINE_MODELS):
+            values = []
+            for dataset_key in all_data.keys():
+                models = all_data[dataset_key]['models']
+                if model in models:
+                    val = models[model].get(metric)
+                    values.append(val if val is not None else np.nan)
+                else:
+                    values.append(np.nan)
+            
+            offset = (model_idx - len(BASELINE_MODELS) / 2 + 0.5) * bar_width
+            bars = ax.bar(x + offset, values, bar_width, 
+                         label=model, color=BASELINE_COLORS[model_idx],
+                         alpha=0.85, edgecolor='white', linewidth=0.5)
+        
+        ax.set_ylabel(f'{label} MSE')
+        ax.set_xlabel('Dataset')
+        ax.set_xticks(x)
+        ax.set_xticklabels(dataset_titles, rotation=30, ha='right', fontsize=9)
+        ax.set_yscale('log')
+        ax.grid(True, alpha=0.3, linestyle='--', color='gray')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_title(label, fontsize=11, fontweight='bold')
+    
+    # Add single legend at the bottom
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=len(BASELINE_MODELS),
+              bbox_to_anchor=(0.5, -0.02), fontsize=10, frameon=False)
+    
+    plt.suptitle(title, fontsize=13, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.2)
+    
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Saved: {output_path}")
+    print(f"Saved: {output_path.with_suffix('.pdf')}")
+
+
+def generate_baseline_stacked_plot(
+    dataset_keys: List[str],
+    metrics: List[str],
+    metric_labels: List[str],
+    title: str,
+    output_path: Path,
+    outputs_dir: Path
+):
+    """Generate stacked bar plot for baseline comparison (like AEMET_category_comparison)."""
+    
+    # Collect data from all datasets
+    all_data = {}
+    for dataset_key in dataset_keys:
+        data = get_baseline_models_data(dataset_key, outputs_dir)
+        if data:
+            all_data[dataset_key] = {
+                'title': DATASETS[dataset_key]['title'],
+                'models': data
+            }
+    
+    if not all_data:
+        print(f"No baseline data found for plot: {output_path}")
+        return
+    
+    dataset_keys_with_data = list(all_data.keys())
+    dataset_titles = [all_data[k]['title'] for k in dataset_keys_with_data]
+    n_datasets = len(dataset_titles)
+    n_metrics = len(metrics)
+    
+    fig, ax = plt.subplots(figsize=(max(10, n_datasets * 2), 6))
+    
+    x = np.arange(n_datasets)
+    bar_width = 0.18
+    
+    # Compute ranks for each metric
+    def compute_ranks_for_metric(metric_key):
+        ranks = {}
+        for dataset_key in dataset_keys_with_data:
+            models = all_data[dataset_key]['models']
+            model_values = []
+            for model in BASELINE_MODELS:
+                if model in models:
+                    val = models[model].get(metric_key)
+                    if val is not None:
+                        model_values.append((model, val))
+            
+            # Sort by value (lower is better for MSE)
+            model_values.sort(key=lambda x: x[1])
+            for rank, (model, _) in enumerate(model_values, 1):
+                if dataset_key not in ranks:
+                    ranks[dataset_key] = {}
+                ranks[dataset_key][model] = rank
+        return ranks
+    
+    all_values = []
+    
+    for metric_idx, (metric, label) in enumerate(zip(metrics, metric_labels)):
+        ranks = compute_ranks_for_metric(metric)
+        
+        for model_idx, model in enumerate(BASELINE_MODELS):
+            values = []
+            for dataset_key in dataset_keys_with_data:
+                models_data = all_data[dataset_key]['models']
+                if model in models_data:
+                    val = models_data[model].get(metric)
+                    values.append(val if val is not None else np.nan)
+                else:
+                    values.append(np.nan)
+            
+            all_values.extend([v for v in values if not np.isnan(v)])
+            
+            # Position: group by dataset, then by metric, then by model
+            group_offset = metric_idx * (len(BASELINE_MODELS) * bar_width + 0.1)
+            model_offset = model_idx * bar_width
+            positions = x * (n_metrics * len(BASELINE_MODELS) * bar_width + 0.5) + group_offset + model_offset
+            
+            bars = ax.bar(positions, values, bar_width,
+                         label=model if metric_idx == 0 else '',
+                         color=BASELINE_COLORS[model_idx],
+                         alpha=0.85, edgecolor='white', linewidth=0.5)
+            
+            # Add rank labels
+            for bar, dataset_key in zip(bars, dataset_keys_with_data):
+                if not np.isnan(bar.get_height()):
+                    rank = ranks.get(dataset_key, {}).get(model)
+                    if rank:
+                        ax.annotate(f'#{rank}',
+                                   xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                                   xytext=(0, 3), textcoords='offset points',
+                                   ha='center', va='bottom', fontsize=7, fontweight='bold',
+                                   color='#333333')
+    
+    # Set up x-axis - one tick per dataset
+    tick_positions = []
+    for i in range(n_datasets):
+        center = i * (n_metrics * len(BASELINE_MODELS) * bar_width + 0.5) + (n_metrics * len(BASELINE_MODELS) * bar_width) / 2 - bar_width / 2
+        tick_positions.append(center)
+    
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(dataset_titles, rotation=30, ha='right', fontsize=10)
+    
+    ax.set_ylabel('MSE', fontsize=11)
+    ax.set_xlabel('Dataset', fontsize=11)
+    ax.set_yscale('log')
+    
+    # Adjust y-axis limits
+    if all_values:
+        min_val = min(all_values)
+        max_val = max(all_values)
+        ax.set_ylim(min_val * 0.3, max_val * 10)
+    
+    ax.grid(True, alpha=0.3, linestyle='--', color='gray', axis='y')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Add metric labels at top
+    # This is complex, so skip for now and just use legend
+    
+    # Legend
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles[:len(BASELINE_MODELS)], labels[:len(BASELINE_MODELS)],
+             loc='upper center', bbox_to_anchor=(0.5, -0.15),
+             ncol=len(BASELINE_MODELS), fontsize=10, frameon=False)
+    
+    plt.title(title, fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Saved: {output_path}")
+
+
+def generate_all_baseline_plots(outputs_dir: Path = None, plots_output_dir: Path = None):
+    """Generate all baseline comparison plots."""
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    print("=" * 60)
+    print("Generating Baseline Comparison Plots")
+    print("=" * 60)
+    
+    # Sequence datasets - individual metric subplots
+    print("\n1. Sequence datasets baseline comparison (subplots)...")
+    generate_baseline_comparison_plot(
+        dataset_keys=SEQUENCE_DATASETS,
+        metrics=BASELINE_METRICS_SEQ,
+        metric_labels=BASELINE_LABELS_SEQ,
+        title='Baseline Comparison: Sequence Datasets',
+        output_path=plots_output_dir / 'baseline_comparison_seq.png',
+        outputs_dir=outputs_dir
+    )
+    
+    # PDE datasets - individual metric subplots
+    print("\n2. PDE datasets baseline comparison (subplots)...")
+    generate_baseline_comparison_plot(
+        dataset_keys=PDE_DATASETS,
+        metrics=BASELINE_METRICS_PDE,
+        metric_labels=BASELINE_LABELS_PDE,
+        title='Baseline Comparison: PDE Datasets',
+        output_path=plots_output_dir / 'baseline_comparison_pde.png',
+        outputs_dir=outputs_dir
+    )
+    
+    print("\n" + "=" * 60)
+    print("Done!")
+    print("=" * 60)
+
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Generate category comparison plots for time series datasets'
+    )
+    parser.add_argument(
+        '--dataset', '-d',
+        type=str,
+        choices=list(DATASETS.keys()) + ['all'],
+        default='all',
+        help='Dataset to process (default: all)'
+    )
+    parser.add_argument(
+        '--combined', '-c',
+        action='store_true',
+        help='Generate a combined plot with all datasets'
+    )
+    parser.add_argument(
+        '--outputs-dir', '-o',
+        type=str,
+        default=None,
+        help='Path to outputs directory'
+    )
+    parser.add_argument(
+        '--plots-dir', '-p',
+        type=str,
+        default=None,
+        help='Path to save plots (default: same as outputs-dir)'
+    )
+    parser.add_argument(
+        '--ignore-gaussian',
+        action='store_true',
+        default=True,
+        help='Ignore Gaussian kernel category (default: True)'
+    )
+    parser.add_argument(
+        '--include-gaussian',
+        action='store_true',
+        default=False,
+        help='Include Gaussian kernel category (overrides --ignore-gaussian)'
+    )
+    parser.add_argument(
+        '--baseline',
+        action='store_true',
+        help='Generate baseline comparison plots (DDPM, NCSN, FFM, k-FFM)'
+    )
+    
+    args = parser.parse_args()
+    
+    outputs_dir = Path(args.outputs_dir) if args.outputs_dir else None
+    plots_dir = Path(args.plots_dir) if args.plots_dir else None
+    
+    # --include-gaussian overrides --ignore-gaussian
+    ignore_gaussian = not args.include_gaussian
+    
+    if args.baseline:
+        generate_all_baseline_plots(outputs_dir, plots_dir)
+    elif args.combined:
+        generate_combined_plot(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian)
+    elif args.dataset == 'all':
+        generate_all_plots(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian)
+    else:
+        generate_single_plot(args.dataset, outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian)
+

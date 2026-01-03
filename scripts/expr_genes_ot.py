@@ -441,6 +441,8 @@ def train_single_config(
     if training_metrics is not None:
         if training_metrics.train_losses:
             quality_metrics.final_train_loss = training_metrics.train_losses[-1]
+            # Compute convergence metrics from the loss history
+            quality_metrics.set_convergence_metrics(training_metrics.train_losses)
         if training_metrics.epoch_times:
             quality_metrics.total_train_time = sum(training_metrics.epoch_times)
         if training_metrics.path_lengths:
@@ -662,12 +664,28 @@ def aggregate_results(all_results: Dict) -> Dict[str, Dict]:
             ot_coupling=quality_list[0].ot_coupling if quality_list else "",
         )
         
-        for attr in ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 
-                     'autocorrelation_mse', 'density_mse', 'final_train_loss',
-                     'total_train_time', 'mean_path_length', 'mean_grad_variance']:
+        # All metrics to average across seeds (including spectrum and convergence)
+        metrics_to_average = [
+            # Pointwise statistics
+            'mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 
+            'autocorrelation_mse', 'density_mse', 
+            # Training metrics
+            'final_train_loss', 'total_train_time', 'mean_path_length', 'mean_grad_variance',
+            # Spectrum metrics
+            'spectrum_mse', 'spectrum_mse_log',
+            # Convergence metrics
+            'convergence_rate', 'final_stability',
+        ]
+        
+        for attr in metrics_to_average:
             values = [getattr(q, attr, None) for q in quality_list if getattr(q, attr, None) is not None]
             if values:
                 setattr(mean_quality, attr, np.mean(values))
+        
+        # For epochs_to_90pct, take the median (it's an integer)
+        epochs_values = [q.epochs_to_90pct for q in quality_list if getattr(q, 'epochs_to_90pct', None) is not None]
+        if epochs_values:
+            mean_quality.epochs_to_90pct = int(np.median(epochs_values))
         
         representative_training = training_list[0] if training_list else None
         first_seed = list(seed_results.keys())[0]
@@ -804,6 +822,10 @@ def create_summary_report(aggregated: Dict, save_path: Path):
                 'kurtosis_mse': float(q.kurtosis_mse) if q.kurtosis_mse is not None else None,
                 'autocorrelation_mse': float(q.autocorrelation_mse) if q.autocorrelation_mse is not None else None,
                 'density_mse': float(q.density_mse) if q.density_mse is not None else None,
+                'spectrum_mse': float(q.spectrum_mse) if getattr(q, 'spectrum_mse', None) is not None else None,
+                'convergence_rate': float(q.convergence_rate) if getattr(q, 'convergence_rate', None) is not None else None,
+                'final_stability': float(q.final_stability) if getattr(q, 'final_stability', None) is not None else None,
+                'epochs_to_90pct': int(q.epochs_to_90pct) if getattr(q, 'epochs_to_90pct', None) is not None else None,
             },
             'training_metrics': {
                 'final_train_loss': float(q.final_train_loss) if q.final_train_loss is not None else None,

@@ -5,3 +5,4 @@ outputs-old/
 trash/
 env.yaml
 log*.txt
+.vscode/
