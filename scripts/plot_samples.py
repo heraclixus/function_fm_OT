@@ -2,24 +2,28 @@
 """
 Generate 3x2 sample visualization figure comparing different methods.
 
-Layout:
+Layout for 1D data:
     Ground Truth    |    Independent
     Euclidean       |    RBF
     Signature       |    DDPM
 
+Layout for 2D data (no Signature kernel):
+    Ground Truth    |    Independent
+    Euclidean       |    RBF
+    DDPM            |    NCSN
+
 Usage:
     python plot_samples.py --dataset AEMET
     python plot_samples.py --dataset Heston --sample-idx 5
-    python plot_samples.py --dataset navier_stokes --is-2d
+    python plot_samples.py --dataset navier_stokes
 """
 
 import argparse
-import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List
 
 
 # Dataset configurations
@@ -33,22 +37,28 @@ DATASETS = {
         'dir': 'expr_genes_ot_comprehensive',
         'title': 'Gene Expression',
         'is_2d': False,
+        'samples_file': 'samples_original.pt',  # Different filename
     },
     'econ1': {
         'dir': 'econ_ot_comprehensive',
         'title': 'Economy',
         'is_2d': False,
         'subdir': 'econ1_population',
+        'samples_file': 'samples_original.pt',  # Different filename
     },
     'Heston': {
         'dir': 'Heston_ot_kappa1.0',
         'title': 'Heston Model',
         'is_2d': False,
+        # Ground truth generated on-the-fly from this data file
+        'data_file': 'data/Heston_kappa1.0_sigma0.3_n5000.pt',
     },
     'rBergomi': {
         'dir': 'rBergomi_ot_H0p10',
         'title': 'Rough Bergomi',
         'is_2d': False,
+        # Ground truth generated on-the-fly from this data file
+        'data_file': 'data/rBergomi_H0p10_n5000.pt',
     },
     'kdv': {
         'dir': 'kdv_ot',
@@ -74,42 +84,120 @@ DATASETS = {
 
 # Method configurations - which config folder to use for each method
 METHOD_CONFIGS = {
-    'Ground Truth': None,  # Special case - load from ground_truth.pt
+    'Ground Truth': None,  # Special case - load from ground_truth.pt or data file
     'Independent': ['independent'],
     'Euclidean': ['euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5'],
     'RBF': ['rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5'],
     'Signature': ['signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0'],
     'DDPM': ['DDPM'],
+    'NCSN': ['NCSN'],
 }
 
-# Plot order for 3x2 grid
-PLOT_ORDER = ['Ground Truth', 'Independent', 'Euclidean', 'RBF', 'Signature', 'DDPM']
+# Plot order for 3x2 grid - different for 1D and 2D
+PLOT_ORDER_1D = ['Ground Truth', 'Independent', 'Euclidean', 'RBF', 'Signature', 'DDPM']
+PLOT_ORDER_2D = ['Ground Truth', 'Independent', 'Euclidean', 'RBF', 'DDPM', 'NCSN']
 
 
 def load_samples(
     dataset_dir: Path,
     method_name: str,
     config_options: List[str],
-    seed: int = 1
+    seed: int = 1,
+    data_file: Optional[str] = None,
+    project_root: Optional[Path] = None,
+    samples_file: str = 'samples.pt',
 ) -> Optional[torch.Tensor]:
-    """Load samples for a given method."""
+    """Load samples for a given method.
+    
+    Parameters
+    ----------
+    dataset_dir : Path
+        Directory containing experiment outputs
+    method_name : str
+        Name of the method
+    config_options : List[str]
+        List of config folder names to try
+    seed : int
+        Random seed directory
+    data_file : str, optional
+        Path to original data file (relative to project root) for on-the-fly datasets
+    project_root : Path, optional
+        Project root directory
+    samples_file : str
+        Name of the samples file (default: 'samples.pt', can be 'samples_original.pt')
+    """
     if config_options is None:
-        # Ground truth
+        # Ground truth - try multiple sources
+        
+        # 1. Try ground_truth.pt in dataset directory
         gt_path = dataset_dir / 'ground_truth.pt'
         if gt_path.exists():
-            return torch.load(gt_path, weights_only=True)
-        # Try alternative locations
+            data = torch.load(gt_path, weights_only=False)
+            if isinstance(data, dict):
+                for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                    if key in data and isinstance(data[key], torch.Tensor):
+                        return data[key]
+                for v in data.values():
+                    if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                        return v
+            return data
+        
+        # 2. Try alternative locations in dataset directory
         for alt in ['ground_truth_rescaled.pt', 'ground_truth_original.pt']:
             alt_path = dataset_dir / alt
             if alt_path.exists():
-                return torch.load(alt_path, weights_only=True)
+                data = torch.load(alt_path, weights_only=False)
+                if isinstance(data, dict):
+                    for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                        if key in data and isinstance(data[key], torch.Tensor):
+                            return data[key]
+                    for v in data.values():
+                        if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                            return v
+                return data
+        
+        # 3. Try loading from original data file (for Heston, rBergomi, etc.)
+        if data_file and project_root:
+            data_path = project_root / data_file
+            if data_path.exists():
+                data = torch.load(data_path, weights_only=False)
+                # Handle different data formats
+                if isinstance(data, dict):
+                    # Heston format: has 'log_V_normalized', 'log_S_normalized', etc.
+                    if 'log_V_normalized' in data:
+                        return data['log_V_normalized']
+                    # rBergomi format: has 'log_V_normalized' 
+                    if 'log_S_normalized' in data:
+                        return data['log_S_normalized']
+                    # Generic: try common keys
+                    for key in ['data', 'samples', 'X', 'x']:
+                        if key in data:
+                            return data[key]
+                    # Return first tensor value found
+                    for v in data.values():
+                        if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                            return v
+                return data
+        
         return None
     
     # Try each config option
     for config_name in config_options:
-        samples_path = dataset_dir / config_name / f'seed_{seed}' / 'samples.pt'
-        if samples_path.exists():
-            return torch.load(samples_path, weights_only=True)
+        # Try with the specified samples file, then fallback to samples.pt
+        for sf in [samples_file, 'samples.pt', 'samples_original.pt']:
+            samples_path = dataset_dir / config_name / f'seed_{seed}' / sf
+            if samples_path.exists():
+                data = torch.load(samples_path, weights_only=False)
+                # Handle dict format
+                if isinstance(data, dict):
+                    for key in ['samples', 'data', 'X', 'x']:
+                        if key in data and isinstance(data[key], torch.Tensor):
+                            return data[key]
+                    # Return first tensor
+                    for v in data.values():
+                        if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                            return v
+                return data
     
     return None
 
@@ -123,6 +211,54 @@ def plot_1d_sample(ax, sample: torch.Tensor, title: str, color: str = 'blue'):
     x = np.linspace(0, 1, len(sample))
     ax.plot(x, sample, color=color, linewidth=1.5, alpha=0.9)
     ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.set_xlabel('t', fontsize=10)
+    ax.set_ylabel('Value', fontsize=10)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+
+def plot_1d_samples_multi(ax, samples: torch.Tensor, title: str, color: str = 'blue', 
+                          n_samples: int = 500, alpha: float = 0.1):
+    """Plot multiple 1D time series samples overlaid.
+    
+    Parameters
+    ----------
+    ax : matplotlib axis
+    samples : torch.Tensor
+        Tensor of shape (N, T) where N is number of samples, T is time steps
+    title : str
+        Plot title
+    color : str
+        Line color
+    n_samples : int
+        Number of samples to plot (randomly selected if more available)
+    alpha : float
+        Transparency for individual lines
+    """
+    samples = samples.cpu().numpy()
+    if samples.ndim == 1:
+        samples = samples.reshape(1, -1)
+    
+    n_available = samples.shape[0]
+    n_plot = min(n_samples, n_available)
+    
+    # Randomly sample if we have more than needed
+    if n_available > n_samples:
+        indices = np.random.choice(n_available, n_samples, replace=False)
+        samples = samples[indices]
+    
+    x = np.linspace(0, 1, samples.shape[1])
+    
+    # Plot all samples with transparency
+    for i in range(n_plot):
+        ax.plot(x, samples[i], color=color, linewidth=0.5, alpha=alpha)
+    
+    # Plot mean trajectory with thicker line
+    mean_traj = np.mean(samples, axis=0)
+    ax.plot(x, mean_traj, color=color, linewidth=2, alpha=0.9, label='Mean')
+    
+    ax.set_title(f'{title} (n={n_plot})', fontsize=12, fontweight='bold')
     ax.set_xlabel('t', fontsize=10)
     ax.set_ylabel('Value', fontsize=10)
     ax.grid(True, alpha=0.3, linestyle='--')
@@ -180,6 +316,9 @@ def create_sample_comparison_figure(
     dataset_info = DATASETS[dataset_key]
     dataset_dir = outputs_dir / dataset_info['dir']
     
+    # Get project root for loading data files
+    project_root = outputs_dir.parent
+    
     # Handle subdirectory (e.g., econ1_population)
     if 'subdir' in dataset_info:
         dataset_dir = dataset_dir / dataset_info['subdir']
@@ -191,17 +330,48 @@ def create_sample_comparison_figure(
     # Determine if 2D
     data_is_2d = is_2d if is_2d is not None else dataset_info.get('is_2d', False)
     
+    # Select appropriate plot order based on data type
+    plot_order = PLOT_ORDER_2D if data_is_2d else PLOT_ORDER_1D
+    
+    # Get data file path for on-the-fly datasets (Heston, rBergomi)
+    data_file = dataset_info.get('data_file', None)
+    # Get samples file name (default: samples.pt, can be samples_original.pt)
+    samples_file = dataset_info.get('samples_file', 'samples.pt')
+    
     # Load samples for each method
     samples = {}
-    for method_name in PLOT_ORDER:
+    for method_name in plot_order:
         config_options = METHOD_CONFIGS[method_name]
-        sample_data = load_samples(dataset_dir, method_name, config_options, seed)
+        sample_data = load_samples(
+            dataset_dir, method_name, config_options, seed,
+            data_file=data_file, project_root=project_root,
+            samples_file=samples_file
+        )
         if sample_data is not None:
-            if sample_idx < len(sample_data):
-                samples[method_name] = sample_data[sample_idx]
+            # Handle case where sample_data might still be a dict
+            if isinstance(sample_data, dict):
+                # Try to extract the first tensor
+                for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                    if key in sample_data and isinstance(sample_data[key], torch.Tensor):
+                        sample_data = sample_data[key]
+                        break
+                else:
+                    # Get first tensor in dict
+                    for v in sample_data.values():
+                        if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                            sample_data = v
+                            break
+            
+            # Now index into the tensor
+            if isinstance(sample_data, torch.Tensor):
+                if sample_idx < len(sample_data):
+                    samples[method_name] = sample_data[sample_idx]
+                else:
+                    print(f"Warning: sample_idx {sample_idx} out of range for {method_name}")
+                    samples[method_name] = sample_data[0]
             else:
-                print(f"Warning: sample_idx {sample_idx} out of range for {method_name}")
-                samples[method_name] = sample_data[0]
+                print(f"Warning: Unexpected data type for {method_name}: {type(sample_data)}")
+                samples[method_name] = None
         else:
             print(f"Warning: Could not load samples for {method_name}")
             samples[method_name] = None
@@ -209,7 +379,7 @@ def create_sample_comparison_figure(
     # Create figure
     fig, axes = plt.subplots(3, 2, figsize=(8, 10))
     
-    # Colors for 1D plots
+    # Colors for plots
     colors = {
         'Ground Truth': '#2E7D32',  # Green
         'Independent': '#1565C0',   # Blue
@@ -217,10 +387,11 @@ def create_sample_comparison_figure(
         'RBF': '#7B1FA2',           # Purple
         'Signature': '#C62828',     # Red
         'DDPM': '#00838F',          # Teal
+        'NCSN': '#6A1B9A',          # Deep Purple
     }
     
     # Plot each method
-    for idx, method_name in enumerate(PLOT_ORDER):
+    for idx, method_name in enumerate(plot_order):
         row = idx // 2
         col = idx % 2
         ax = axes[row, col]
@@ -239,23 +410,146 @@ def create_sample_comparison_figure(
         else:
             plot_1d_sample(ax, sample, method_name, color=colors.get(method_name, 'blue'))
     
-    # Add colorbar for 2D plots
-    if data_is_2d:
-        # Find a valid image for colorbar
-        for idx, method_name in enumerate(PLOT_ORDER):
-            if samples.get(method_name) is not None:
-                row, col = idx // 2, idx % 2
-                fig.colorbar(axes[row, col].images[0], ax=axes, shrink=0.6, aspect=30,
-                           pad=0.02, label='Value')
-                break
-    
     plt.suptitle(f'{dataset_info["title"]} - Sample Comparison', 
                 fontsize=14, fontweight='bold', y=0.98)
-    plt.tight_layout(rect=[0, 0, 0.95 if data_is_2d else 1, 0.96])
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     
     # Save
     if output_path is None:
         output_path = outputs_dir / f'{dataset_key}_sample_comparison.png'
+    
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    print(f"Saved: {output_path}")
+    print(f"Saved: {output_path.with_suffix('.pdf')}")
+    
+    return fig
+
+
+def create_multi_sample_comparison_figure(
+    dataset_key: str,
+    outputs_dir: Path,
+    n_samples: int = 500,
+    seed: int = 1,
+    output_path: Optional[Path] = None,
+) -> Optional[plt.Figure]:
+    """
+    Create 3x2 multi-sample comparison figure showing 500 samples overlaid.
+    Only works for 1D data.
+    
+    Parameters
+    ----------
+    dataset_key : str
+        Key of the dataset in DATASETS
+    outputs_dir : Path
+        Path to outputs directory
+    n_samples : int
+        Number of samples to plot per method (default: 500)
+    seed : int
+        Random seed directory to use
+    output_path : Path, optional
+        Where to save the figure
+    """
+    if dataset_key not in DATASETS:
+        print(f"Unknown dataset: {dataset_key}")
+        print(f"Available: {list(DATASETS.keys())}")
+        return None
+    
+    dataset_info = DATASETS[dataset_key]
+    
+    # Skip 2D datasets for multi-sample visualization
+    if dataset_info.get('is_2d', False):
+        print(f"Skipping multi-sample visualization for 2D dataset: {dataset_key}")
+        return None
+    
+    dataset_dir = outputs_dir / dataset_info['dir']
+    project_root = outputs_dir.parent
+    
+    # Handle subdirectory (e.g., econ1_population)
+    if 'subdir' in dataset_info:
+        dataset_dir = dataset_dir / dataset_info['subdir']
+    
+    if not dataset_dir.exists():
+        print(f"Dataset directory not found: {dataset_dir}")
+        return None
+    
+    plot_order = PLOT_ORDER_1D
+    
+    # Get data file and samples file
+    data_file = dataset_info.get('data_file', None)
+    samples_file = dataset_info.get('samples_file', 'samples.pt')
+    
+    # Load ALL samples for each method (not just one)
+    all_samples = {}
+    for method_name in plot_order:
+        config_options = METHOD_CONFIGS[method_name]
+        sample_data = load_samples(
+            dataset_dir, method_name, config_options, seed,
+            data_file=data_file, project_root=project_root,
+            samples_file=samples_file
+        )
+        if sample_data is not None:
+            # Handle case where sample_data might still be a dict
+            if isinstance(sample_data, dict):
+                for key in ['log_V_normalized', 'log_S_normalized', 'data', 'samples', 'X', 'x']:
+                    if key in sample_data and isinstance(sample_data[key], torch.Tensor):
+                        sample_data = sample_data[key]
+                        break
+                else:
+                    for v in sample_data.values():
+                        if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                            sample_data = v
+                            break
+            
+            if isinstance(sample_data, torch.Tensor):
+                all_samples[method_name] = sample_data
+            else:
+                print(f"Warning: Unexpected data type for {method_name}: {type(sample_data)}")
+                all_samples[method_name] = None
+        else:
+            print(f"Warning: Could not load samples for {method_name}")
+            all_samples[method_name] = None
+    
+    # Create figure
+    fig, axes = plt.subplots(3, 2, figsize=(10, 12))
+    
+    # Colors for plots
+    colors = {
+        'Ground Truth': '#2E7D32',
+        'Independent': '#1565C0',
+        'Euclidean': '#E65100',
+        'RBF': '#7B1FA2',
+        'Signature': '#C62828',
+        'DDPM': '#00838F',
+        'NCSN': '#6A1B9A',
+    }
+    
+    # Plot each method
+    for idx, method_name in enumerate(plot_order):
+        row = idx // 2
+        col = idx % 2
+        ax = axes[row, col]
+        
+        samples = all_samples.get(method_name)
+        if samples is None:
+            ax.text(0.5, 0.5, 'No data', ha='center', va='center', 
+                   transform=ax.transAxes, fontsize=12)
+            ax.set_title(method_name, fontsize=12, fontweight='bold')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            continue
+        
+        plot_1d_samples_multi(ax, samples, method_name, 
+                             color=colors.get(method_name, 'blue'),
+                             n_samples=n_samples, alpha=0.05)
+    
+    plt.suptitle(f'{dataset_info["title"]} - Multi-Sample Comparison ({n_samples} samples)', 
+                fontsize=14, fontweight='bold', y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    
+    # Save
+    if output_path is None:
+        output_path = outputs_dir / f'{dataset_key}_multi_sample_comparison.png'
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
@@ -309,6 +603,22 @@ def main():
         action='store_true',
         help='List available datasets and exit'
     )
+    parser.add_argument(
+        '--multi-sample',
+        action='store_true',
+        help='Generate multi-sample comparison plot (500 samples overlaid)'
+    )
+    parser.add_argument(
+        '--n-samples',
+        type=int,
+        default=500,
+        help='Number of samples for multi-sample plot (default: 500)'
+    )
+    parser.add_argument(
+        '--both',
+        action='store_true',
+        help='Generate both single-sample and multi-sample plots'
+    )
     
     args = parser.parse_args()
     
@@ -327,18 +637,38 @@ def main():
     
     output_path = Path(args.output) if args.output else None
     
-    fig = create_sample_comparison_figure(
-        dataset_key=args.dataset,
-        outputs_dir=outputs_dir,
-        sample_idx=args.sample_idx,
-        seed=args.seed,
-        output_path=output_path,
-        is_2d=args.is_2d if args.is_2d else None,
-    )
+    # Generate single-sample plot unless --multi-sample only
+    if not args.multi_sample or args.both:
+        fig = create_sample_comparison_figure(
+            dataset_key=args.dataset,
+            outputs_dir=outputs_dir,
+            sample_idx=args.sample_idx,
+            seed=args.seed,
+            output_path=output_path,
+            is_2d=args.is_2d if args.is_2d else None,
+        )
+        if fig:
+            plt.close(fig)
     
-    if fig:
-        plt.close(fig)
-        print("Done!")
+    # Generate multi-sample plot if requested
+    if args.multi_sample or args.both:
+        multi_output_path = None
+        if output_path:
+            # Modify output path for multi-sample version
+            stem = output_path.stem
+            multi_output_path = output_path.with_name(f'{stem}_multi{output_path.suffix}')
+        
+        fig = create_multi_sample_comparison_figure(
+            dataset_key=args.dataset,
+            outputs_dir=outputs_dir,
+            n_samples=args.n_samples,
+            seed=args.seed,
+            output_path=multi_output_path,
+        )
+        if fig:
+            plt.close(fig)
+    
+    print("Done!")
 
 
 if __name__ == '__main__':
