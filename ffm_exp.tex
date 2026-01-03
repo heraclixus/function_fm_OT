@@ -1,0 +1,77 @@
+\section{Experiments}
+\label{sect:experiments}
+    
+    We now investigate the empirical performance of FFM on several real-world datasets. In all settings, we assume we are working in the space ${\FF = L^2([0, 1])}$ and we parametrize $u_t(\blank \mid \theta)$ via a Fourier Neural Operator (FNO) \citep{li2020fourier}. Sampling is achieved by drawing a sample from the reference measure $g \sim \mu_0$ and numerically solving the flow ODE (Equation \eqref{eqn:flow_ode}) with initial condition $g$. In our implementation, we use the DOPRI solver \citep{DORMAND198019}. Details can be found in Appendix \ref{appendix:experiment_details}. Code for all of our experiments will be made available upon publication.
+
+    \paragraph{Datasets} Our experiments in 1D include five datasets selected for their diverse correlation structures, exhibiting distinctive patterns that enable visual evaluation of generated samples. Plots of original and generated samples, as well as a detailed description of each dataset, can be found in Appendix \ref{appendix:datasets}. The first dataset (AEMET) consists of a set of 73 curves describing the mean daily temperature at various locations \citep{febrero2012statistical}. The second is a gene expression time series dataset \citep{orlando2008global}, and the remaining three consist of global economic time series on population, GDP per capita, and labor force size \citep{bolt2020maddison, inklaar2018rebasing, IMFlabor}. We also experiment with a dataset of solutions to the Navier-Stokes equation on a 2D torus \citep{li2022learning}.
+
+\begin{table*}[t]
+\centering
+\caption{Average MSEs between true and generated samples for pointwise statistics on five 1D datasets, along with the standard deviation across ten random seeds. The average number of function evaluations (NFEs) for each sampling procedure in our implementation is also reported. Our FFM models obtain the best average performance across nearly all metrics, while simultaneously requiring fewer NFEs than the diffusion baselines.}
+\resizebox{\textwidth}{!}{%
+\notsotiny
+\begin{tabular}{c|lcccccc}
+\toprule
+ && Mean & Variance & Skewness & Kurtosis & Autocorrelation & NFEs \\
+\midrule
+\parbox[t]{2mm}{\multirow{5}{*}{\rotatebox[origin=c]{90}{\textbf{AEMET}}}} & FFM-OT (ours) & \textbf{8.4e-2} (9.9e-2) & 1.7e+0 (1.1e+0) & 7.7e-2 (6.6e-2) & 3.3e-2 (3.7e-2) & \textbf{3.0e-6} (4.0e-6) & 668 \\
+&FFM-VP (ours) & 1.3e-1 (1.4e-1) & \textbf{1.5e+0} (1.2e+0) & \textbf{5.e-2} (4.3e-2) & \textbf{1.7e-2} (1.6e-2) & 6.0e-6 (7.0e-6) & 488 \\
+&DDPM          & 3.e-1 (3.0e-1) & 3.5e+0 (4.6e+0) & 2.2e-1 (2.2e-1) & 4.8e-2 (3.7e-2) & 1.2e-5 (9.e-6) & 1000\\ 
+&DDO           & 2.4e-1 (1.4e-1) & 6.6e+0 (5.1e+0) & 2.1e-1 (4.1e-2) & 3.8e-2 (1.3e-2) & 6.7e-4 (1.3e-4) & 2000\\ 
+&GANO          & 6.5e+1 (1.9e+2) & 3.7e+1 (4.0e+1) & 2.9e+0 (4.8e+0) & 3.3e-1 (4.0e-1) & 1.2e-3 (3.1e-3) & 1\\ 
+\midrule
+\parbox[t]{2mm}{\multirow{5}{*}{\rotatebox[origin=c]{90}{\textbf{Genes}}}} & FFM-OT (ours) & 6.7e-4 (4.5e-4) & 3.9e-3 (2.6e-4) & 2.4e-1 (4.7e-2) & 7.7e-2 (9.0e-3) & 2.5e-4 (1.7e-4) & 386
+\\&FFM-VP (ours) & \textbf{4.2e-4} (3.8e-4) & \textbf{7.3e-4} (3.5e-4) & \textbf{1.9e-1} (6.1e-2) & \textbf{4.3e-2} (1.1e-2) & \textbf{1.3e-4} (1.0e-4) & 290\\
+&DDPM          & 8.8e-4 (4.5e-4) & 1.9e-3 (4.2e-4) & 3.6e-1 (1.9e-1) & 6.3e-2 (1.1e-2) & 4.3e-4 (9.3e-5) & 1000\\ 
+&DDO           & 4.2e-3 (1.5e-3) & 1.2e-3 (3.6e-4) & 3.0e-1 (5.7e-2) & 1.1e-1 (1.1e-2) & 1.0e-3 (1.7e-4) & 2000\\ 
+&GANO          & 4.6e-3 (2.0e-3) & 7.4e-3 (1.5e-3) & 1.7e+0 (1.3e+0) & 3.3e-1 (8.4e-2) & 2.e-3 (1.0e-3) & 1 \\ 
+\midrule
+\parbox[t]{2mm}{\multirow{5}{*}{\rotatebox[origin=c]{90}{\textbf{Pop.}}}} & FFM-OT (ours) & \textbf{3.9e-5} (3.8e-5) & \textbf{7.0e-6} (9.e-6) & 4.1e+0 (5.3e+0) & 9.0e-2 (1.0e-1) & \textbf{2.7e-5} (4.6e-5) & 662\\
+&FFM-VP (ours) & 6.3e-5 (4.5e-5) & \textbf{7.0e-6} (7.e-6) & \textbf{1.3e+0} (6.1e-1) & 7.8e-2 (4.5e-2) & 2.5e-3 (5.2e-4) & 494 \\
+&DDPM          & 5.7e-5 (5.2e-5) & 6.0e-6 (7.0e-6) & 1.9e+0 (1.2e+0) & \textbf{5.9e-2} (4.4e-2) & 5.6e-5 (3.5e-5) & 1000\\ 
+&DDO           & 1.9e-4 (8.7e-5) & 2.7e-4 (1.9e-5) & 4.2e+0 (4.1e-1) & 2.7e-1 (3.7e-2) & 3.2e-2 (1.9e-3) & 2000\\ 
+&GANO          & 1.1e-3 (9.8e-4) & 4.3e-5 (7.1e-5) & 8.e+0 (2.4e+0) & 8.6e-1 (5.3e-1) & 1.6e-3 (3.6e-3) & 1\\ 
+\midrule
+\parbox[t]{2mm}{\multirow{5}{*}{\rotatebox[origin=c]{90}{\textbf{GDP}}}} & FFM-OT (ours) & \textbf{2.0e-5} (1.2e-5) & 9.e-6 (6.e-6) & 6.3e-1 (3.5e-1) & \textbf{3.9e-2} (1.9e-2) & \textbf{2.8e-5} (1.4e-5) & 536\\
+&FFM-VP (ours) & 4.1e-5 (2.1e-5) & \textbf{8.0e-6} (7.0e-6) & \textbf{6.2e-1} (4.1e-1) & 5.0e-2 (2.5e-2) & 1.9e-4 (2.3e-5) & 494\\
+&DDPM          & 1.6e-4 (1.5e-4) & 2.5e-5 (2.9e-5) & 8.6e-1 (5.9e-1) & 5.1e-2 (2.1e-2) & 1.4e-4 (1.0e-4) & 1000 \\ 
+&DDO           & 2.1e-4 (1.1e-4) & 2.9e-4 (9.4e-5) & 1.7e+0 (1.1e-1) & 2.7e-1 (2.4e-2) & 9.6e-3 (1.5e-3) & 2000 \\ 
+&GANO          & 8.4e-4 (7.8e-4) & 5.0e-5 (3.7e-5) & 2.6e+0 (1.3e+0) & 2.1e-1 (1.4e-1) & 1.6e-4 (1.6e-4) & 1\\ 
+\midrule
+\parbox[t]{2mm}{\multirow{5}{*}{\rotatebox[origin=c]{90}{\textbf{Labor}}}} & FFM-OT (ours) &\textbf{6.9e-5} (6.1e-5) & 2.6e-5 (1.1e-5) & 5.4e+0 (3.3e+0) & 1.5e-1 (1.8e-1) & \textbf{1.3e-4} (7.5e-5) & 308\\
+&FFM-VP (ours) & 7.1e-5 (5.5e-5) & \textbf{2.1e-5} (9.0e-6) & \textbf{2.0e+0} (1.5e+0) & \textbf{8.6e-2} (7.3e-2) & 5.8e-4 (1.4e-4) & 302\\
+&DDPM          & 4.2e-4 (3.3e-4) & 3.5e-4 (5.6e-4) & 1.8e+3 (3.5e+3) & 1.0e+1 (1.5e+1) & 2.9e-4 (1.6e-4) & 1000\\ 
+&DDO           & 3.1e-4 (1.9e-4) & 4.0e-4 (1.2e-4) & 4.8e+0 (5.3e-1) & 4.3e-1 (3.9e-2) & 7.8e-3 (1.2e-3) & 2000 \\ 
+&GANO          & 3.2e-3 (6.3e-3) & 6.5e-4 (4.6e-4) & 7.8e+0 (7.6e+0) & 1.2e+0 (3.7e-1) & 1.8e-3 (9.4e-4) & 1\\ 
+
+\bottomrule
+\end{tabular}
+}
+\label{tab:pointwise_mses_aemet}
+\end{table*}
+
+    \paragraph{Baselines}
+    We compare against several functional generative models: the Denoising Diffusion Operator (DDO) \citep{lim2023score} with NCSN noise scale, GANO \citep{rahman2022generative}, and functional DDPM \citep{kerrigan2022diffusion}. We do not compare to non-functional methods, as we are primarily interested in developing discretization-invariant generative models. 
+    
+    All noise was specified via a Gaussian process with a tuned Matérn kernel. For the sake of a fair comparison, we used the same architecture for all models, with the exception of GANO which requires a generator and discriminator pair. We used the code provided by the authors of DDPM and GANO but re-implemented the DDO model. For all models, we performed extensive hyperparameter tuning and report the best results. Generally, we find the FFM methods are less sensitive to hyperparameter choices than the baseline methods.
+
+    \paragraph{Results}
+
+    Figure \ref{fig:ns_samples} shows samples from the Navier-Stokes dataset and samples generated from the various models we consider. Qualitatively, our FFM model and the DDPM model match the ground-truth samples, whereas DDO and GANO suffer from mode collapse.
+
+    \begin{figure}[t]
+    \centering
+    \includegraphics[]{figures/econ3_upsampled.png}
+    \caption{Samples from the Labor dataset and samples from the various models at 5x super-resolution.}
+    \label{fig:genes_superres_corr}
+    \end{figure}
+    
+    Figure \ref{fig:unconditional_aemet} shows samples from the AEMET dataset and generated samples. Our FFM model is able to qualitatively match the samples from the ground truth distribution. The DDPM samples are similar in quality, but do not respect the range of values seen in the data. For DDO, we observe smoothness issues, and for GANO, we again see mode collapse issues.
+    
+    Quantitatively, Table \ref{tab:pointwise_mses_aemet} evaluates model performance on the 1D datasets by computing pointwise statistics of the generated functions and computing the MSE between these pointwise statistics and those of the real data. Table \ref{tab:ns_results} reports the MSE between the density and spectra \citep{lim2023energy} of the real and generated samples on the Navier-Stokes dataset. See Appendix \ref{appendix:additional_results} for visualizations. Variants of FFM perform the best, on average, in almost all metrics considered across the wide range of domains on which we performed evaluation. While pointwise statistics have limitations, for functional models there are no clear alternatives for evaluation, and pointwise metrics are broadly used in the literature \citep{rahman2022generative, lim2023score}. Together with the qualitative results, these metrics further validate the performance of our method.
+
+     A key benefit of the FNO architecture is the ability to perform generation at arbitrary resolutions, a necessary component in any functional task. We demonstrate this on the Labor dataset in Figure \ref{fig:genes_superres_corr}. All models are trained on the original data resolution, but samples are drawn at a five times greater resolution. Samples from FFM and DDPM qualitatively match the characteristics of the ground truth distribution, whereas samples from DDO and GANO do not match the smoothness of the original data. See Appendix \ref{appendix:additional_results} for further evalution. 
+    
+\paragraph{Conditional Generation}
+
+    We also demonstrate an extension of our method for conditional tasks, such as interpolating (or extrapolating) a finite set of given observations. We explore two approaches: conditional training and a modified sampling process inspired by ILVR \citep{choi2021ilvr}. We note alternative conditional methods \citep{mathieu2023geometric} are readily applicable as well. In Figure \ref{fig:conditional}, we demonstrate these two approaches. See Appendix \ref{appendix:conditional_models} for details.

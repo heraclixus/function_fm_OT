@@ -1,0 +1,7 @@
+__pycache__/
+data/
+outputs/
+outputs-old/
+trash/
+env.yaml
+log*.txt

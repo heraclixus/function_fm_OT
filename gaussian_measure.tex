@@ -1,0 +1,68 @@
+\subsection{Special Case: Gaussian Measures}
+\label{sect:gaussian_setting}
+
+    In this section, we specialize to the setting where the reference measure $\mu_0$ and conditional measures $\mu_t^f$ are chosen to be Gaussian measures \citep{bogachev1998gaussian}. We make this ansatz for several reasons. Foremost, our marginal vector field (Equation \eqref{eqn:marginal_vector_field}) requires an absolute continuity assumption. In infinite-dimensional (separable) Banach spaces, the absolute continuity of Gaussian measures is well-understood, e.g. via the Cameron-Martin theorem and the Feldman-H\'ajek theorem \citep{da2014stochastic, bogachev1998gaussian}. Moreover, we are able to parametrize our Gaussian measures via Gaussian processes \citep{rasmussen2006gaussian, wild2022generalized} for which a number of flexible choices of kernels have been explored in the machine learning literature.
+    
+    More formally, for any $f\in \FF$ we define a conditional path of probability measures $(\mu_t)_{t \in [0, 1]}$ to be a Gaussian measure $\mu_t^f = \NN(m_t^f, C_t^f)$ with mean $m_t^f \in \FF$ and covariance operator $C_t^f: \FF \to \FF$. Note that the $C_t^f$ are necessarily symmetric, non-negative and trace-class \citep[Ch.~2]{da2014stochastic}. In particular, this rules out multiples of the identity operator (corresponding to white noise) as a valid choice for $C_t^f$, as these operators are not compact and hence not trace-class.
+    
+    In practice, we parametrize $t \mapsto m_t^f$ by a Fr\'echet differentiable mapping and specify $C_t^f$ by a covariance operator $C_0$ and variance schedule $t \mapsto \sigma_t^f \in \mathbb{R}_{> 0 }$ such that $C_t^f = (\sigma_t^f)^2 C_0$. At time $t=0$, we choose to parametrize $\mu_0^f = \mu_0 = \NN(0, C_0)$ as a centered Gaussian measure independent of the function $f \in \FF$. The measure $\mu_0$ will serve as the reference measure in our generative model. In order to satisfy the desiderata of Section \ref{sect:construction_paths}, at time $t=1$ we will choose $m_1^f = f$ and $C_t^f$ to have small operator norm so that $\mu_1^f$ is a Gaussian measure concentrated around $f$. 
+    
+    In this case, we note that the conditional flow $\phi^f: [0, 1] \times \FF \to \FF$ defined via $\phi_t^f(g) = \sigma_t^f g + m_t^f$  will push $g \sim \NN(0, C_0)$ to the desired conditional measure $\mu_t^f$, i.e. $\mu_t^f = [\phi_t^f]_{\#} \NN(0, C_0)$. Using the flow ODE \eqref{eqn:flow_ode}, we see that a vector field generating this conditional path of measures is
+    \begin{equation} \label{eqn:conditional_vector_field}
+        v_t^f(g) = \frac{(\sigma_t^f)^\prime}{\sigma_t^f}(g - m_t^f) + \frac{\d}{\d t} m_t^f
+    \end{equation}
+    where $(\sigma_t^f)^\prime$ is the ordinary time derivative of the variance schedule and $\d / \d t (m_t^f)$ is the Fr\'echet derivative of the mapping $t \mapsto m_t^f$. The proof of this fact is a straightforward generalization of \citet[Theorem 3]{lipman2022flow}, which demonstrates the analogous relationship in finite-dimensional Euclidean spaces.
+
+    In this work, we consider two concrete parameterizations. In the first parametrization (``OT''), the mean and variance are given as affine functions of $t$ and $f$:
+
+    \begin{equation}
+        \label{eqn:ot_param}
+        m_t^f = tf \qquad \sigma_t^f = 1 - (1 - \sigma_{\min}) t.
+    \end{equation}
+
+    The ``OT'' path is named as such as it corresponds to an optimal transport map between Gaussians in the Euclidean setting \citep{lipman2022flow, mccann1997convexity}. 
+    
+    In the second parametrization (``VP''), we set
+    \begin{equation}
+        \label{eqn:vp_params}
+        m_t^f = \alpha_{1-t} f \qquad \sigma_t^f = \sqrt{1 - \alpha_{1-t}^2}.
+    \end{equation}
+
+    This path is inspired inspired by probability paths defined via variance preserving diffusion models \citep{lipman2022flow, song2020score}. We additionally experimented with the ``variance exploding'' parametrization \citep{lipman2022flow, song2020score}, but found empirically that this was not suitable for our setting. See Appendix \ref{appendix:experiment_details} for details. Here, $\sigma_{\min} \in \R_{>0}$ and $\alpha_t \in \R_{>0}$ are hyperparameters of the model controlling the variance of the conditional measures.
+
+\subsection{Absolute Continuity for Gaussians} 
+\label{sect:ac_of_mixtures}
+
+    In general, the absolute continuity assumption of Theorem \ref{theorem:gluing_formula} is difficult to satisfy in function spaces. In the Gaussian setting, we may reduce this assumption to assumptions regarding the parametrization of our Gaussian measures. By the Feldman-H\'ajek theorem \citep[Theorem~2.25]{da2014stochastic}, our conditional Gaussian measures $\mu_t^f$ will be mutually absolutely continuous if the difference in means lies in the Cameron-Martin space of $C_t$, i.e. $m_t^f - m_t^g \in C_t^{1/2}(\FF)$. 
+    
+    Thus, under suitable assumptions on the data distribution $\nu$ and an appropriate parametrization of the conditional means, our marginal vector fields (Equation \eqref{eqn:marginal_vector_field}) will be well-defined as a consequence of \mbox{Theorem \ref{theorem:mutually_ac_mixture}}. Suppose $C_t = \sigma_t^2 C_0$ is a scaled version of some fixed covariance operator $C_0$ with the assumption that $0 < \sigma_t^2 \leq M$ is positive and bounded above. By Lemma 6.15 of \citet{stuart2010inverse}, this choice guarantees us that the Cameron-Martin space is constant in time, i.e. $C_0^{1/2}(\FF) = C_t^{1/2}(\FF)$ for all $t \in [0, 1]$.
+
+    Assume further that the data distribution is supported on the Cameron-Martin space of $C_0$, i.e. ${\nu(C_0^{1/2}(\FF)) = 1}$. In this case, given our covariance parametrization, our Gaussian measures will be mutually absolutely continuous if e.g. $m_t^f$ is an affine function of $f$.  We note that the parametrizations suggested in Section \ref{sect:gaussian_setting} are all affine, and so under the assumption that the data is supported on the Cameron-Martin space $C_0^{1/2}(\FF)$ our setup is well-defined.
+    
+    In practice, verifying whether the data distribution is supported on $C_0^{1/2}(\FF)$ is difficult. One option to guarantee this assumption is satisfied is to pre-process the data via some mapping ${T: \FF \to C_0^{1/2}(\FF) \subseteq \FF}$ whose image is contained in $C_0^{1/2}(\FF)$. We refer to Appendix C of \citet{lim2023score} for a further discussion of such mappings and related results. We note that in practice, we do not find it necessary to perform this pre-processing.
+
+\subsection{Training the FFM Model}
+
+    Ideally, we would like to perform functional regression on the marginal vector field defined via Equation \eqref{eqn:marginal_vector_field}, where we approximate $v_t(g)$ by a model $u_t(g \mid \theta)$ with parameters $\theta \in \R^p$. This could be achieved, for instance, by minimizing the loss
+    \begin{equation}
+        \LL(\theta) = \E_{t \sim \UU[0,1], g \sim \mu_t}\left[ \norm{v_t(g) - u_t(g \mid \theta)}^2 \right]
+    \end{equation}
+
+    where $\UU[0,1]$ denotes a uniform distribution over the interval $[0,1]$. Note here that our model is a mapping $u: \R^p \times [0, 1] \times \FF \to \FF$, i.e. our model is a parametrized, time-dependent operator on the function space $\FF$. However, such a loss is intractable to compute -- in fact, if we had access to $(v_t)_{t \in [0, 1]}$, there would be no need to learn a model. Consider instead the conditional loss, defined via
+    \begin{align}\label{eqn:cond_loss}
+        \JJ(\theta)&= \E_{t \sim \UU [0,1], f \sim \nu, g \sim \mu_t^{f} } \left[ \norm{v_t^f(g) - u_t(f \mid \theta)}^2 \right]
+    \end{align}
+
+    where, rather than regressing on the intractable $v_t$, we regress on the \emph{known} conditional vector fields $v_t^f$. In the following theorem, we claim that minimizing $\JJ(\theta)$ is equivalent to minimizing $\LL(\theta)$.
+
+\begin{restatable}{theorem}{losstheorem}
+    Assume that the true and model vector fields are square-integrable, i.e. $\int_0^1 \int_\FF \norm{v_t(g)}^2 \d \mu_t(g) \d t < \infty$ and $\int_0^1 \int_\FF \norm{u_t(g \mid \theta)}^2 \d \mu_t(g) \d t < \infty$. Then, 
+    $\LL(\theta) = \JJ(\theta) + C$ where $C \in \R$ is a constant independent of $\theta$.
+\end{restatable}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[]{figures/AEMET_comparison_v3.png}
+    \caption{Unconditional generation of 500 samples on the AEMET dataset. Samples from our FFM model and DDPM appear visually to better match the characteristics of the real data relative to DDO and GANO.}
+    \label{fig:unconditional_aemet}
+\end{figure}
