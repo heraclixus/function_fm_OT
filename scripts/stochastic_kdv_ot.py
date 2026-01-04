@@ -70,7 +70,88 @@ parser.add_argument('--batch_size', type=int, default=512, help='Batch size')
 parser.add_argument('--batch_size_sig', type=int, default=128, help='Batch size for signature kernel')
 parser.add_argument('--load-only', action='store_true', help='Load saved results instead of training')
 parser.add_argument('--baselines-only', action='store_true', help='Run only DDPM and NCSN baselines')
+parser.add_argument('--config-file', type=str, default=None,
+                    help='Path to a YAML or JSON file containing OT configurations')
+parser.add_argument('--config', type=str, default=None,
+                    help='Run only this config (for parallelization). Use --list-configs to see available.')
+parser.add_argument('--seed', type=int, default=None,
+                    help='Run only this seed (use with --config for single run)')
+parser.add_argument('--list-configs', action='store_true',
+                    help='List available configurations and exit')
 args, _ = parser.parse_known_args()
+
+
+def load_configs_from_file(file_path: Path) -> Dict:
+    """Load configurations from a YAML or JSON file."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Config file not found: {file_path}")
+    
+    if file_path.suffix in ['.yaml', '.yml']:
+        import yaml
+        with open(file_path, 'r') as f:
+            return yaml.safe_load(f)
+    elif file_path.suffix == '.json':
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    else:
+        raise ValueError(f"Unsupported config file format: {file_path.suffix}. Use .yaml, .yml, or .json")
+
+
+def get_all_configs() -> Dict:
+    """Get all OT configurations, merging built-in with external if provided."""
+    configs = dict(OT_CONFIGS)
+    if args.config_file:
+        external_configs = load_configs_from_file(Path(args.config_file))
+        configs.update(external_configs)
+    return configs
+
+
+def list_all_configs():
+    """Print all available configurations."""
+    configs = get_all_configs()
+    print("\nAvailable configurations:")
+    print("="*60)
+    for name, config in configs.items():
+        use_ot = config.get('use_ot', False)
+        kernel = config.get('ot_kernel', 'N/A')
+        method = config.get('ot_method', 'N/A')
+        reg = config.get('ot_reg', 'N/A')
+        print(f"  {name}")
+        print(f"    use_ot={use_ot}, kernel={kernel}, method={method}, reg={reg}")
+    print(f"\nTotal: {len(configs)} configurations")
+
+
+def run_single_config_with_seeds(config_name: str, seeds: list = None):
+    """Run a single configuration with specified seeds."""
+    configs = get_all_configs()
+    
+    if config_name not in configs:
+        print(f"ERROR: Config '{config_name}' not found.")
+        print("Available configs:", list(configs.keys()))
+        sys.exit(1)
+    
+    config = configs[config_name]
+    seeds = seeds or random_seeds
+    
+    print(f"\n{'='*60}")
+    print(f"Running: {config_name}")
+    print(f"Seeds: {seeds}")
+    print(f"{'='*60}")
+    
+    loader = train_loader_signature if config.get("ot_kernel") == "signature" else train_loader
+    
+    for seed in seeds:
+        config_dir = spath / config_name / f"seed_{seed}"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        train_single_config(
+            config_name=config_name,
+            config=config,
+            seed=seed,
+            train_loader=loader,
+            ground_truth=ground_truth,
+            save_dir=config_dir,
+        )
 
 # Load data
 print("\nLoading stochastic KdV data...")
@@ -527,8 +608,9 @@ def run_all_experiments() -> Dict[str, Dict[int, Dict]]:
     """Run all configurations with all seeds."""
     
     all_results = {}
+    all_configs = get_all_configs()
     
-    for config_name, config in OT_CONFIGS.items():
+    for config_name, config in all_configs.items():
         print(f"\n{'='*60}")
         print(f"Configuration: {config_name}")
         print(f"{'='*60}")
@@ -564,7 +646,7 @@ def load_all_results(include_baselines: bool = True) -> Dict[str, Dict[int, Dict
     
     all_results = {}
     
-    all_configs = dict(OT_CONFIGS)
+    all_configs = get_all_configs()
     if include_baselines:
         all_configs.update(BASELINE_CONFIGS)
     
@@ -742,10 +824,26 @@ def create_summary_report(aggregated: Dict, save_path: Path):
 # =============================================================================
 
 if __name__ == "__main__":
+    # Handle list-configs first
+    if args.list_configs:
+        list_all_configs()
+        sys.exit(0)
+    
+    # Handle single config run
+    if args.config:
+        seeds_to_run = [args.seed] if args.seed else random_seeds
+        run_single_config_with_seeds(args.config, seeds_to_run)
+        print(f"\nCompleted single config run: {args.config}")
+        sys.exit(0)
+    
+    all_configs = get_all_configs()
+    
     print("="*60)
     print(f"OT-FFM Experiments on Stochastic KdV")
-    print(f"Configs: {len(OT_CONFIGS)}, Seeds: {n_seeds}")
+    print(f"Configs: {len(all_configs)}, Seeds: {n_seeds}")
     print(f"Output: {spath}")
+    if args.config_file:
+        print(f"External config file: {args.config_file}")
     if args.baselines_only:
         print("MODE: Baselines-only (running DDPM and NCSN only)")
     elif args.load_only:
