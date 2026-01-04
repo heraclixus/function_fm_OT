@@ -1,0 +1,339 @@
+# =============================================================================
+# Phase 1: Signature Kernel Hyperparameter Sweep for rBergomi dataset
+# Goal: Improve autocorrelation_mse (2.3x worse than DDPM) on rough paths H=0.1
+#
+# rBergomi-specific considerations:
+# - Rough paths with H=0.1 (much rougher than Brownian motion H=0.5)
+# - Signature kernels should theoretically excel on rough paths
+# - Lead-lag augmentation may help capture short-range dependencies
+# - Lower dyadic order might be better for very rough paths
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Baseline: Current best signature config (for comparison)
+# -----------------------------------------------------------------------------
+sig_baseline:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Lead-Lag Augmentation (KEY for autocorrelation on rough paths)
+# Lead-lag captures lagged dependencies - critical for rough volatility
+# -----------------------------------------------------------------------------
+sig_leadlag_order1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true  # KEY CHANGE
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_leadlag_order2:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_leadlag_order3:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 3
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Dyadic Order Sweep (without lead-lag)
+# For rough paths, lower order might work better (roughness in small scales)
+# -----------------------------------------------------------------------------
+sig_order2:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_order3:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 3
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Static Kernel Sigma Sweep
+# Smaller sigma for rough paths (captures local variations)
+# -----------------------------------------------------------------------------
+sig_sigma0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.1  # Very small for rough paths
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_sigma0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_sigma2.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 2.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Lower Sinkhorn Regularization
+# May preserve coupling structure better for rough paths
+# -----------------------------------------------------------------------------
+sig_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Combined: Lead-lag + optimized for rough paths
+# -----------------------------------------------------------------------------
+sig_leadlag_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_leadlag_sigma0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5  # Smaller sigma for rough paths
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_leadlag_order2_sigma0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# Ablations
+# -----------------------------------------------------------------------------
+sig_no_time_aug:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: false  # No time augmentation
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_no_normalize:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: false  # No normalization
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# RBF Kernel Sigma Sweep (as baseline comparison)
+# Smaller sigma may help for rough paths
+# -----------------------------------------------------------------------------
+rbf_sigma0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_sigma1.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 1.0
+
+rbf_sigma2.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 2.0
+

@@ -84,6 +84,8 @@ parser.add_argument('--n_seeds', type=int, default=3, help='Number of random see
 parser.add_argument('--load-only', action='store_true', help='Load saved results instead of training')
 parser.add_argument('--baselines-only', action='store_true', help='Run only DDPM and NCSN baselines')
 parser.add_argument('--spath', type=str, default=None, help='Output/load directory')
+parser.add_argument('--config-file', type=str, default=None,
+                    help='Path to JSON/YAML file with additional OT configurations')
 parser.add_argument('--config', type=str, default=None, 
                     help='Run only this config (for parallelization). Use --list-configs to see available.')
 parser.add_argument('--seed', type=int, default=None,
@@ -362,6 +364,60 @@ BASELINE_CONFIGS = {
         "precondition": True,
     },
 }
+
+
+# =============================================================================
+# Config Loading Functions
+# =============================================================================
+
+def load_configs_from_file(config_path: str) -> Dict:
+    """
+    Load additional OT configurations from JSON or YAML file.
+    
+    Expected format:
+    {
+        "config_name": {
+            "use_ot": true,
+            "ot_method": "sinkhorn",
+            "ot_reg": 0.1,
+            "ot_kernel": "signature",
+            "ot_coupling": "sample",
+            "ot_kernel_params": {...}
+        },
+        ...
+    }
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    if config_path.suffix in ['.yaml', '.yml']:
+        try:
+            import yaml
+            with open(config_path, 'r') as f:
+                configs = yaml.safe_load(f)
+        except ImportError:
+            raise ImportError("PyYAML required for YAML config files. Install with: pip install pyyaml")
+    elif config_path.suffix == '.json':
+        with open(config_path, 'r') as f:
+            configs = json.load(f)
+    else:
+        raise ValueError(f"Unsupported config file format: {config_path.suffix}. Use .json or .yaml")
+    
+    print(f"Loaded {len(configs)} configurations from {config_path}")
+    return configs
+
+
+def get_all_configs(include_external: bool = True) -> Dict:
+    """Get all OT configurations, optionally including external config file."""
+    all_configs = dict(OT_CONFIGS)
+    
+    if include_external and args.config_file:
+        external_configs = load_configs_from_file(args.config_file)
+        all_configs.update(external_configs)
+    
+    return all_configs
+
 
 # =============================================================================
 # Training Functions
@@ -808,16 +864,19 @@ def create_summary_report(aggregated: Dict, save_path: Path):
 
 def run_single_config_with_seeds(config_name: str, seeds_to_run: list = None):
     """Run a single configuration with specified seeds."""
+    # Get all configs including external
+    all_ot_configs = get_all_configs()
+    
     # Determine which config dict to use
-    if config_name in OT_CONFIGS:
-        config = OT_CONFIGS[config_name]
+    if config_name in all_ot_configs:
+        config = all_ot_configs[config_name]
         is_baseline = False
     elif config_name in BASELINE_CONFIGS:
         config = BASELINE_CONFIGS[config_name]
         is_baseline = True
     else:
         print(f"ERROR: Unknown config '{config_name}'")
-        print(f"Available OT configs: {list(OT_CONFIGS.keys())}")
+        print(f"Available OT configs: {list(all_ot_configs.keys())}")
         print(f"Available baseline configs: {list(BASELINE_CONFIGS.keys())}")
         sys.exit(1)
     
@@ -851,23 +910,52 @@ def run_single_config_with_seeds(config_name: str, seeds_to_run: list = None):
 
 def list_all_configs():
     """Print all available configurations."""
-    print("\nAvailable OT configurations:")
-    print("-" * 40)
-    for name in OT_CONFIGS.keys():
-        print(f"  {name}")
+    all_ot_configs = get_all_configs()
     
-    print("\nAvailable baseline configurations:")
-    print("-" * 40)
-    for name in BASELINE_CONFIGS.keys():
-        print(f"  {name}")
+    print("\n" + "="*70)
+    print("Available OT Configurations:")
+    print("="*70)
     
-    print(f"\nTotal: {len(OT_CONFIGS)} OT configs + {len(BASELINE_CONFIGS)} baselines")
+    for config_name, config in all_ot_configs.items():
+        kernel = config.get('ot_kernel', 'none')
+        method = config.get('ot_method', 'none')
+        reg = config.get('ot_reg', 'N/A')
+        coupling = config.get('ot_coupling', 'N/A')
+        use_ot = config.get('use_ot', False)
+        
+        if use_ot:
+            print(f"  {config_name}")
+            print(f"    kernel={kernel}, method={method}, reg={reg}, coupling={coupling}")
+            if 'ot_kernel_params' in config:
+                params = config['ot_kernel_params']
+                if kernel == 'signature':
+                    print(f"    signature: dyadic_order={params.get('dyadic_order')}, "
+                          f"lead_lag={params.get('lead_lag')}, "
+                          f"static_sigma={params.get('static_kernel_sigma')}")
+                elif kernel == 'rbf':
+                    print(f"    rbf: sigma={params.get('sigma')}")
+        else:
+            print(f"  {config_name} (independent, no OT)")
+    
+    print("\n" + "="*70)
+    print("Available Baseline Configurations:")
+    print("="*70)
+    for config_name, config in BASELINE_CONFIGS.items():
+        print(f"  {config_name}: {config.get('method')}")
+    
+    print(f"\nTotal: {len(all_ot_configs)} OT configs + {len(BASELINE_CONFIGS)} baselines")
     print(f"Seeds: {random_seeds}")
-    print("\nExample usage for parallel runs:")
-    print(f"  python {sys.argv[0]} --config independent --seed 1")
-    print(f"  python {sys.argv[0]} --config signature_sinkhorn_reg0.1 --seed 2")
-    print(f"  python {sys.argv[0]} --config DDPM --seed 1")
-    print("\nAfter all parallel runs complete:")
+    
+    print("\n" + "="*70)
+    print("Usage Examples:")
+    print("="*70)
+    print(f"  # Run single config with single seed:")
+    print(f"  python {sys.argv[0]} --config signature_sinkhorn_reg0.1 --seed 1")
+    print()
+    print(f"  # Run with external config file:")
+    print(f"  python {sys.argv[0]} --config-file ../configs/rbergomi_sweep.yaml --config sig_leadlag")
+    print()
+    print(f"  # After all parallel runs complete:")
     print(f"  python {sys.argv[0]} --load-only")
 
 
