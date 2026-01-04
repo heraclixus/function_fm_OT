@@ -42,6 +42,18 @@ parser.add_argument('--baselines-only', action='store_true',
                     help='Run only DDPM and NCSN baselines (not OT experiments)')
 parser.add_argument('--spath', type=str, default='../outputs/econ_ot_comprehensive/',
                     help='Output/load directory')
+parser.add_argument('--config-file', type=str, default=None,
+                    help='Path to JSON/YAML file with additional OT configurations')
+parser.add_argument('--config', type=str, default=None,
+                    help='Run only this specific configuration (for parallelization)')
+parser.add_argument('--seed', type=int, default=None,
+                    help='Run only this seed (use with --config for single run)')
+parser.add_argument('--dataset', type=str, default=None,
+                    help='Run only this dataset (econ1_population, econ2_gdp, econ3_labor)')
+parser.add_argument('--list-configs', action='store_true',
+                    help='List available configurations and exit')
+parser.add_argument('--epochs', type=int, default=None,
+                    help='Override default number of epochs')
 args, _ = parser.parse_known_args()
 from typing import Dict, List, Any, Tuple
 
@@ -389,6 +401,109 @@ BASELINE_CONFIGS = {
     },
 }
 
+
+# =============================================================================
+# Config Loading Functions
+# =============================================================================
+
+def load_configs_from_file(config_path: str) -> Dict:
+    """
+    Load additional OT configurations from JSON or YAML file.
+    
+    Expected format:
+    {
+        "config_name": {
+            "use_ot": true,
+            "ot_method": "sinkhorn",
+            "ot_reg": 0.1,
+            "ot_kernel": "signature",
+            "ot_coupling": "sample",
+            "ot_kernel_params": {...}
+        },
+        ...
+    }
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    if config_path.suffix in ['.yaml', '.yml']:
+        try:
+            import yaml
+            with open(config_path, 'r') as f:
+                configs = yaml.safe_load(f)
+        except ImportError:
+            raise ImportError("PyYAML required for YAML config files. Install with: pip install pyyaml")
+    elif config_path.suffix == '.json':
+        with open(config_path, 'r') as f:
+            configs = json.load(f)
+    else:
+        raise ValueError(f"Unsupported config file format: {config_path.suffix}. Use .json or .yaml")
+    
+    print(f"Loaded {len(configs)} configurations from {config_path}")
+    return configs
+
+
+def get_all_configs(include_external: bool = True) -> Dict:
+    """Get all OT configurations, optionally including external config file."""
+    all_configs = dict(OT_CONFIGS)
+    
+    if include_external and args.config_file:
+        external_configs = load_configs_from_file(args.config_file)
+        all_configs.update(external_configs)
+    
+    return all_configs
+
+
+def list_all_configs():
+    """Print all available configurations and exit."""
+    all_configs = get_all_configs()
+    
+    print("\n" + "="*70)
+    print("Available OT Configurations:")
+    print("="*70)
+    
+    for config_name, config in all_configs.items():
+        kernel = config.get('ot_kernel', 'none')
+        method = config.get('ot_method', 'none')
+        reg = config.get('ot_reg', 'N/A')
+        coupling = config.get('ot_coupling', 'N/A')
+        use_ot = config.get('use_ot', False)
+        
+        if use_ot:
+            print(f"  {config_name}")
+            print(f"    kernel={kernel}, method={method}, reg={reg}, coupling={coupling}")
+            if 'ot_kernel_params' in config:
+                params = config['ot_kernel_params']
+                if kernel == 'signature':
+                    print(f"    signature: dyadic_order={params.get('dyadic_order')}, "
+                          f"lead_lag={params.get('lead_lag')}, "
+                          f"static_sigma={params.get('static_kernel_sigma')}")
+                elif kernel == 'rbf':
+                    print(f"    rbf: sigma={params.get('sigma')}")
+        else:
+            print(f"  {config_name} (independent, no OT)")
+    
+    print("\n" + "="*70)
+    print("Available Baseline Configurations:")
+    print("="*70)
+    for config_name, config in BASELINE_CONFIGS.items():
+        print(f"  {config_name}: {config.get('method')}")
+    
+    print("\n" + "="*70)
+    print("Available Datasets:")
+    print("="*70)
+    print("  econ1_population, econ2_gdp, econ3_labor")
+    print()
+    
+    print("Usage examples:")
+    print("  # Run single config on single dataset with single seed:")
+    print("  python econ_ot.py --config signature_sinkhorn_reg0.1 --dataset econ1_population --seed 1")
+    print()
+    print("  # Run with external config file:")
+    print("  python econ_ot.py --config-file sweep_configs.yaml --config sig_leadlag_order2")
+    print()
+
 # =============================================================================
 # Training Functions
 # =============================================================================
@@ -646,8 +761,15 @@ def run_dataset_experiments(
     dataset_name: str,
     dataset_info: dict,
     output_dir: Path,
+    configs_to_run: Dict = None,
+    seeds_to_run: List[int] = None,
 ) -> Dict[str, Dict[int, Dict]]:
     """Run all configurations for a single dataset."""
+    
+    if configs_to_run is None:
+        configs_to_run = get_all_configs()
+    if seeds_to_run is None:
+        seeds_to_run = random_seeds
     
     print(f"\n{'='*70}")
     print(f"Dataset: {dataset_name} (n_x={dataset_info['n_x']})")
@@ -661,12 +783,12 @@ def run_dataset_experiments(
     
     all_results = {}
     
-    for config_name, config in OT_CONFIGS.items():
+    for config_name, config in configs_to_run.items():
         print(f"\n--- Configuration: {config_name} ---")
         
         config_results = {}
         
-        for seed in random_seeds:
+        for seed in seeds_to_run:
             # Create subdirectory
             config_dir = dataset_dir / config_name / f"seed_{seed}"
             config_dir.mkdir(parents=True, exist_ok=True)
@@ -899,10 +1021,134 @@ def create_full_summary(all_aggregated: Dict[str, Dict], save_path: Path):
 # Main Execution
 # =============================================================================
 
+def run_single_config_experiment(
+    config_name: str,
+    config: dict,
+    dataset_name: str,
+    dataset_info: dict,
+    seeds_to_run: List[int],
+    output_dir: Path,
+) -> Dict[int, Dict]:
+    """Run a single configuration for specified seeds."""
+    print(f"\n{'='*70}")
+    print(f"Running: {config_name} on {dataset_name}")
+    print(f"Seeds: {seeds_to_run}")
+    print(f"{'='*70}")
+    
+    dataset_dir = output_dir / dataset_name
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save ground truth if not exists
+    gt_path = dataset_dir / 'ground_truth.pt'
+    if not gt_path.exists():
+        torch.save(dataset_info["ground_truth"], gt_path)
+    
+    config_results = {}
+    for seed in seeds_to_run:
+        config_dir = dataset_dir / config_name / f"seed_{seed}"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        result = train_single_config(
+            config_name=config_name,
+            config=config,
+            seed=seed,
+            dataset_name=dataset_name,
+            dataset_info=dataset_info,
+            save_dir=config_dir,
+        )
+        config_results[seed] = result
+    
+    return config_results
+
+
 if __name__ == "__main__":
+    # Handle --list-configs
+    if args.list_configs:
+        list_all_configs()
+        sys.exit(0)
+    
+    # Override epochs if specified
+    if args.epochs is not None:
+        epochs = args.epochs
+        print(f"Overriding epochs: {epochs}")
+    
+    # Get all configs (including from external file if provided)
+    all_ot_configs = get_all_configs()
+    
+    # Determine which datasets to run
+    if args.dataset:
+        if args.dataset not in DATASETS:
+            print(f"Error: Unknown dataset '{args.dataset}'")
+            print(f"Available: {list(DATASETS.keys())}")
+            sys.exit(1)
+        datasets_to_run = {args.dataset: DATASETS[args.dataset]}
+    else:
+        datasets_to_run = DATASETS
+    
+    # Determine which seeds to run
+    if args.seed is not None:
+        seeds_to_run = [args.seed]
+    else:
+        seeds_to_run = random_seeds
+    
+    # ==========================================================================
+    # MODE: Single config run (for parallelization / sweeps)
+    # ==========================================================================
+    if args.config:
+        if args.config not in all_ot_configs and args.config not in BASELINE_CONFIGS:
+            print(f"Error: Unknown config '{args.config}'")
+            print("Use --list-configs to see available configurations")
+            sys.exit(1)
+        
+        is_baseline = args.config in BASELINE_CONFIGS
+        config = BASELINE_CONFIGS[args.config] if is_baseline else all_ot_configs[args.config]
+        
+        print("="*70)
+        print("Economics OT-FFM: Single Configuration Run")
+        print(f"Config: {args.config}")
+        print(f"Datasets: {list(datasets_to_run.keys())}")
+        print(f"Seeds: {seeds_to_run}")
+        print(f"Output: {spath}")
+        print("="*70)
+        
+        for dataset_name, dataset_info in datasets_to_run.items():
+            if is_baseline:
+                # Run baseline
+                dataset_dir = spath / dataset_name
+                for seed in seeds_to_run:
+                    config_dir = dataset_dir / args.config / f"seed_{seed}"
+                    config_dir.mkdir(parents=True, exist_ok=True)
+                    train_baseline_config(
+                        config_name=args.config,
+                        config=config,
+                        seed=seed,
+                        dataset_name=dataset_name,
+                        dataset_info=dataset_info,
+                        save_dir=config_dir,
+                    )
+            else:
+                # Run OT config
+                run_single_config_experiment(
+                    config_name=args.config,
+                    config=config,
+                    dataset_name=dataset_name,
+                    dataset_info=dataset_info,
+                    seeds_to_run=seeds_to_run,
+                    output_dir=spath,
+                )
+        
+        print("\n" + "="*70)
+        print(f"Single config run complete: {args.config}")
+        print(f"Results saved to: {spath}")
+        print("="*70)
+        sys.exit(0)
+    
+    # ==========================================================================
+    # MODE: Full experiment run (original behavior)
+    # ==========================================================================
     print("="*70)
     print("Comprehensive OT-FFM Experiments on Economics Time Series")
-    print(f"Datasets: {len(DATASETS)}, Configs: {len(OT_CONFIGS)}, Seeds: {n_seeds}")
+    print(f"Datasets: {len(datasets_to_run)}, Configs: {len(all_ot_configs)}, Seeds: {len(seeds_to_run)}")
     print(f"Output directory: {spath}")
     if args.baselines_only:
         print("MODE: Baselines-only (running DDPM and NCSN only)")
@@ -916,7 +1162,7 @@ if __name__ == "__main__":
     all_aggregated = {}
     
     # Run or load experiments for each dataset
-    for dataset_name, dataset_info in DATASETS.items():
+    for dataset_name, dataset_info in datasets_to_run.items():
         if args.baselines_only:
             # Run only baselines
             results = run_baseline_dataset_experiments(dataset_name, dataset_info, spath)

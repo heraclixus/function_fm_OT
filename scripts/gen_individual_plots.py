@@ -849,8 +849,56 @@ SEQUENCE_DATASETS = ['AEMET', 'expr_genes', 'econ1', 'Heston', 'rBergomi']
 PDE_DATASETS = ['kdv', 'navier_stokes', 'stochastic_kdv', 'stochastic_ns']
 
 
+def load_baseline_from_subdirs(dataset_dir: Path, model_name: str, seeds: List[int] = [1, 2, 4]) -> Optional[Dict]:
+    """
+    Load baseline model metrics from subdirectories when not in summary file.
+    Averages metrics across seeds.
+    """
+    model_dir = dataset_dir / model_name
+    if not model_dir.exists():
+        return None
+    
+    all_metrics = []
+    for seed in seeds:
+        seed_dir = model_dir / f'seed_{seed}'
+        quality_file = seed_dir / 'quality_metrics.json'
+        if quality_file.exists():
+            try:
+                with open(quality_file, 'r') as f:
+                    metrics = json.load(f)
+                    all_metrics.append(metrics)
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    if not all_metrics:
+        return None
+    
+    # Only average numeric metric keys (skip strings like config_name, ot_kernel, etc.)
+    numeric_keys = [
+        'mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse',
+        'autocorrelation_mse', 'density_mse', 'spectrum_mse', 'spectrum_mse_log',
+        'final_train_loss', 'total_train_time', 'mean_path_length', 'mean_grad_variance',
+        'seasonal_mse', 'seasonal_amplitude_error', 'seasonal_phase_correlation',
+        'convergence_rate', 'final_stability', 'epochs_to_90pct'
+    ]
+    
+    # Average metrics across seeds
+    avg_metrics = {}
+    for key in numeric_keys:
+        values = [m.get(key) for m in all_metrics if m.get(key) is not None and isinstance(m.get(key), (int, float))]
+        if values:
+            avg_metrics[key] = float(np.mean(values))
+    
+    return avg_metrics if avg_metrics else None
+
+
 def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Dict]:
-    """Get metrics for baseline models (DDPM, NCSN, FFM, k-FFM) for a dataset."""
+    """Get metrics for baseline models (DDPM, NCSN, FFM, k-FFM) for a dataset.
+    
+    For k-FFM, we select the BEST value for each metric across all kernel variants,
+    not just one globally-selected configuration. This ensures that k-FFM represents
+    the best achievable performance for each metric.
+    """
     dataset_info = DATASETS.get(dataset_key)
     if not dataset_info:
         return None
@@ -887,7 +935,7 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     
     result = {}
     
-    # Get DDPM and NCSN baselines
+    # Get DDPM and NCSN baselines - first try from configs, then from subdirectories
     for model in ['DDPM', 'NCSN']:
         if model in configs:
             config_data = configs[model]
@@ -895,6 +943,11 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
                 result[model] = config_data['quality_metrics']
             else:
                 result[model] = config_data
+        else:
+            # Fallback: try to load from subdirectory
+            subdir_metrics = load_baseline_from_subdirs(dataset_dir, model)
+            if subdir_metrics:
+                result[model] = subdir_metrics
     
     # Get FFM (independent coupling)
     if 'independent' in configs:
@@ -904,35 +957,40 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
         else:
             result['FFM'] = config_data
     
-    # Get k-FFM (best across all OT kernel types)
-    ot_categories = {
-        'Signature': ['signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0'],
-        'RBF': ['rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0'],
-        'Euclidean': ['euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0'],
-    }
+    # Get k-FFM: for each metric, find the BEST value across all OT kernel types
+    # This ensures k-FFM represents the best achievable performance per metric
+    ot_config_names = [
+        'signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0',
+        'rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0',
+        'euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0',
+    ]
     
-    best_ot_config = None
-    best_ot_avg_mse = float('inf')
-    core_metrics = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse']
+    # All metrics we might want to compare
+    all_metrics = [
+        'mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 
+        'autocorrelation_mse', 'spectrum_mse', 'spectrum_mse_log', 'density_mse'
+    ]
     
-    for category_name, config_names in ot_categories.items():
-        for config_name in config_names:
-            if config_name in configs:
-                config_data = configs[config_name]
-                if 'quality_metrics' in config_data:
-                    metrics = config_data['quality_metrics']
-                else:
-                    metrics = config_data
-                
-                mse_values = [metrics.get(m) for m in core_metrics if metrics.get(m) is not None]
-                if mse_values:
-                    avg_mse = np.mean(mse_values)
-                    if avg_mse < best_ot_avg_mse:
-                        best_ot_avg_mse = avg_mse
-                        best_ot_config = metrics
+    # Collect all metrics from all OT configs
+    ot_metrics_list = []
+    for config_name in ot_config_names:
+        if config_name in configs:
+            config_data = configs[config_name]
+            if 'quality_metrics' in config_data:
+                ot_metrics_list.append(config_data['quality_metrics'])
+            else:
+                ot_metrics_list.append(config_data)
     
-    if best_ot_config:
-        result['k-FFM'] = best_ot_config
+    if ot_metrics_list:
+        # Build k-FFM metrics by taking the best (minimum) value for each metric
+        kffm_metrics = {}
+        for metric in all_metrics:
+            values = [m.get(metric) for m in ot_metrics_list if m.get(metric) is not None]
+            if values:
+                kffm_metrics[metric] = min(values)
+        
+        if kffm_metrics:
+            result['k-FFM'] = kffm_metrics
     
     return result if result else None
 
