@@ -79,7 +79,40 @@ parser.add_argument('--config', type=str, default=None,
 parser.add_argument('--seed', type=int, default=None,
                     help='Run only this seed (use with --config for single run)')
 parser.add_argument('--list-configs', action='store_true', help='List available configurations and exit')
+parser.add_argument('--config-file', type=str, default=None,
+                    help='Path to a YAML or JSON file containing OT configurations')
+parser.add_argument('--modes', type=int, default=None,
+                    help='Override FNO modes (default: 16)')
+parser.add_argument('--kernel-length', type=float, default=None,
+                    help='Override GP kernel_length (default: 0.001)')
+parser.add_argument('--kernel-variance', type=float, default=None,
+                    help='Override GP kernel_variance (default: 1.0)')
 args, _ = parser.parse_known_args()
+
+
+def load_configs_from_file(file_path: Path) -> Dict:
+    """Load configurations from a YAML or JSON file."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Config file not found: {file_path}")
+    
+    if file_path.suffix in ['.yaml', '.yml']:
+        import yaml
+        with open(file_path, 'r') as f:
+            return yaml.safe_load(f)
+    elif file_path.suffix == '.json':
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    else:
+        raise ValueError(f"Unsupported config file format: {file_path.suffix}. Use .yaml, .yml, or .json")
+
+
+def get_all_configs() -> Dict:
+    """Get all OT configurations, merging built-in with external if provided."""
+    configs = dict(OT_CONFIGS)
+    if args.config_file:
+        external_configs = load_configs_from_file(Path(args.config_file))
+        configs.update(external_configs)
+    return configs
 
 # Load data
 print("\nLoading stochastic Navier-Stokes data...")
@@ -266,9 +299,13 @@ def create_model(device):
 
 def build_ffm_kwargs(config: dict) -> dict:
     """Build kwargs for FFMModelOT from config dict."""
+    # GP prior: prioritize command-line args > config > defaults
+    kl = args.kernel_length if args.kernel_length else config.get("gp_kernel_length", kernel_length)
+    kv = args.kernel_variance if args.kernel_variance else config.get("gp_kernel_variance", kernel_variance)
+    
     kwargs = {
-        "kernel_length": kernel_length,
-        "kernel_variance": kernel_variance,
+        "kernel_length": kl,
+        "kernel_variance": kv,
         "sigma_min": sigma_min,
         "device": device,
         "dtype": torch.float32,
@@ -288,6 +325,13 @@ def build_ffm_kwargs(config: dict) -> dict:
             kwargs["ot_kernel_params"] = config["ot_kernel_params"]
     
     return kwargs
+
+
+def get_fno_modes(config: dict) -> int:
+    """Get FNO modes: prioritize command-line args > config > default."""
+    if args.modes:
+        return args.modes
+    return config.get("fno_modes", modes)
 
 
 def train_single_config(
@@ -487,8 +531,9 @@ def run_all_experiments() -> Dict[str, Dict[int, Dict]]:
     """Run all configurations with all seeds."""
     
     all_results = {}
+    all_configs = get_all_configs()
     
-    for config_name, config in OT_CONFIGS.items():
+    for config_name, config in all_configs.items():
         print(f"\n{'='*60}")
         print(f"Configuration: {config_name}")
         print(f"{'='*60}")
@@ -530,7 +575,7 @@ def load_all_results(include_baselines: bool = True, compute_missing_spectrum: b
     
     all_results = {}
     
-    all_configs = dict(OT_CONFIGS)
+    all_configs = get_all_configs()
     if include_baselines:
         all_configs.update(BASELINE_CONFIGS)
     
@@ -719,15 +764,17 @@ def create_summary_report(aggregated: Dict, save_path: Path):
 def run_single_config_with_seeds(config_name: str, seeds_to_run: list = None):
     """Run a single configuration with specified seeds."""
     # Determine which config dict to use
-    if config_name in OT_CONFIGS:
-        config = OT_CONFIGS[config_name]
+    all_configs = get_all_configs()
+    
+    if config_name in all_configs:
+        config = all_configs[config_name]
         is_baseline = False
     elif config_name in BASELINE_CONFIGS:
         config = BASELINE_CONFIGS[config_name]
         is_baseline = True
     else:
         print(f"ERROR: Unknown config '{config_name}'")
-        print(f"Available OT configs: {list(OT_CONFIGS.keys())}")
+        print(f"Available OT configs: {list(all_configs.keys())}")
         print(f"Available baseline configs: {list(BASELINE_CONFIGS.keys())}")
         sys.exit(1)
     
@@ -758,21 +805,29 @@ def run_single_config_with_seeds(config_name: str, seeds_to_run: list = None):
 
 def list_all_configs():
     """Print all available configurations."""
+    all_configs = get_all_configs()
+    
     print("\nAvailable OT configurations:")
-    print("-" * 40)
-    for name in OT_CONFIGS.keys():
+    print("-" * 60)
+    for name, config in all_configs.items():
+        use_ot = config.get('use_ot', False)
+        kernel = config.get('ot_kernel', 'N/A')
+        method = config.get('ot_method', 'N/A')
+        reg = config.get('ot_reg', 'N/A')
+        gp_kl = config.get('gp_kernel_length', kernel_length)
         print(f"  {name}")
+        print(f"    use_ot={use_ot}, kernel={kernel}, method={method}, reg={reg}, gp_kl={gp_kl}")
     
     print("\nAvailable baseline configurations:")
-    print("-" * 40)
+    print("-" * 60)
     for name in BASELINE_CONFIGS.keys():
         print(f"  {name}")
     
-    print(f"\nTotal: {len(OT_CONFIGS)} OT configs + {len(BASELINE_CONFIGS)} baselines")
+    print(f"\nTotal: {len(all_configs)} OT configs + {len(BASELINE_CONFIGS)} baselines")
     print(f"Seeds: {random_seeds}")
     print("\nExample usage for parallel runs:")
     print(f"  python {sys.argv[0]} --config independent --seed 1")
-    print(f"  python {sys.argv[0]} --config euclidean_exact --seed 2")
+    print(f"  python {sys.argv[0]} --config gp_kl0.02 --config-file ../configs/stochastic_ns_sweep.yaml --seed 1")
     print(f"  python {sys.argv[0]} --config DDPM --seed 1")
     print("\nAfter all parallel runs complete:")
     print(f"  python {sys.argv[0]} --load-only")

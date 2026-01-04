@@ -1,0 +1,152 @@
+# Stochastic Navier-Stokes k-FFM Improvement Sweep
+# Focus: Improving spectrum_mse where DDPM is 115x better
+#
+# Current best k-FFM: rbf_sinkhorn_reg0.1 (spectrum_mse=49,873)
+# Target to beat: DDPM (spectrum_mse=432)
+#
+# Strategy:
+# 1. GP prior tuning (kernel_length sweep) - HIGHEST PRIORITY
+# 2. FNO mode expansion - HIGH PRIORITY
+# 3. RBF/Euclidean sigma and regularization tuning
+
+# =============================================================================
+# Phase 1: GP Prior Tuning (Highest Priority)
+# Current: kernel_length=0.001 (very rough)
+# Hypothesis: Smoother prior better matches NS vorticity
+# =============================================================================
+
+gp_kl0.005:
+  use_ot: false
+  # Will use kernel_length=0.005 in model kwargs
+  gp_kernel_length: 0.005
+  gp_kernel_variance: 1.0
+
+gp_kl0.01:
+  use_ot: false
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 1.0
+
+gp_kl0.02:
+  use_ot: false
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+
+gp_kl0.05:
+  use_ot: false
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 1.0
+
+gp_kl0.1:
+  use_ot: false
+  gp_kernel_length: 0.1
+  gp_kernel_variance: 1.0
+
+# =============================================================================
+# Phase 2: GP Prior + OT Combined
+# =============================================================================
+
+gp_kl0.02_euclidean_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+
+gp_kl0.02_euclidean_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+
+gp_kl0.05_euclidean_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 1.0
+
+gp_kl0.02_rbf_sigma5_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 5.0
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+
+# =============================================================================
+# Phase 3: Lower Sinkhorn Regularization
+# =============================================================================
+
+euclidean_sinkhorn_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_sinkhorn_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+# =============================================================================
+# Phase 4: RBF Sigma Sweep (with default GP prior)
+# =============================================================================
+
+rbf_sigma1.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 1.0
+
+rbf_sigma5.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 5.0
+
+rbf_sigma20.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 20.0
+
+rbf_sigma50.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 50.0
+
+rbf_sigma5.0_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 5.0
+
