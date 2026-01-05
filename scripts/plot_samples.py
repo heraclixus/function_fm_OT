@@ -466,8 +466,6 @@ def create_sample_comparison_figure(
         else:
             plot_1d_sample(ax, sample, method_name, color=colors.get(method_name, 'blue'))
     
-    plt.suptitle(f'{dataset_info["title"]} - Sample Comparison', 
-                fontsize=14, fontweight='bold', y=0.98)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     
     # Save
@@ -601,8 +599,6 @@ def create_multi_sample_comparison_figure(
                              color=colors.get(method_name, 'blue'),
                              n_samples=n_samples, alpha=0.05)
     
-    plt.suptitle(f'{dataset_info["title"]} - Multi-Sample Comparison ({n_samples} samples)', 
-                fontsize=14, fontweight='bold', y=0.98)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     
     # Save

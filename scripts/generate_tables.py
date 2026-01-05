@@ -92,19 +92,65 @@ def get_kernel_categories(ignore_gaussian: bool = True) -> Dict:
         return {k: v for k, v in KERNEL_CATEGORIES_ALL.items() if k != 'Gaussian'}
     return KERNEL_CATEGORIES_ALL.copy()
 
+
+def load_aggregated_results(dataset_dir: Path, dataset_key: str) -> Optional[Dict]:
+    """
+    Load aggregated results file if it exists.
+    
+    Aggregated results combine original experiments + sweep experiments and
+    contain the best configuration for each metric.
+    """
+    # Handle special cases where dataset_key differs from file naming
+    key_mappings = {
+        'econ1': 'econ1_population',
+        'econ2': 'econ2_population', 
+        'econ3': 'econ3_population',
+    }
+    file_key = key_mappings.get(dataset_key, dataset_key)
+    
+    # Try different naming patterns for aggregated results
+    possible_names = [
+        f'aggregated_results_{file_key}.json',
+        f'aggregated_results_{dataset_key}.json',
+        'aggregated_results.json',
+    ]
+    
+    for name in possible_names:
+        agg_file = dataset_dir / name
+        if agg_file.exists():
+            try:
+                with open(agg_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    # Also check parent directory for nested datasets (e.g., econ_ot_comprehensive/econ1_population)
+    parent_dir = dataset_dir.parent
+    for name in possible_names:
+        agg_file = parent_dir / name
+        if agg_file.exists():
+            try:
+                with open(agg_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    return None
+
+
 # Metrics to include in the table
-# Full set of all metrics
-METRICS_ALL = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse', 'convergence_rate', 'spectrum_mse']
-METRIC_HEADERS_ALL = ['Mean', 'Variance', 'Kurtosis', 'Skewness', 'Autocorr.', 'Conv. Rate', 'Spectrum']
+# Full set of all metrics (excluding kurtosis, skewness, and convergence_rate for cleaner tables)
+METRICS_ALL = ['mean_mse', 'variance_mse', 'autocorrelation_mse', 'spectrum_mse']
+METRIC_HEADERS_ALL = ['Mean', 'Variance', 'Autocorr.', 'Spectrum']
 
 # Sequence datasets: no spectrum (not applicable)
-METRICS_SEQUENCE = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse', 'convergence_rate']
-METRIC_HEADERS_SEQUENCE = ['Mean', 'Variance', 'Kurtosis', 'Skewness', 'Autocorr.', 'Conv. Rate']
+METRICS_SEQUENCE = ['mean_mse', 'variance_mse', 'autocorrelation_mse']
+METRIC_HEADERS_SEQUENCE = ['Mean', 'Variance', 'Autocorr.']
 
 # PDE datasets: no autocorrelation, kurtosis, or skewness (not applicable/meaningful for 2D fields)
 # Use spectrum_mse_log for PDE datasets (log scale is more appropriate for energy spectra)
-METRICS_PDE = ['mean_mse', 'variance_mse', 'convergence_rate', 'spectrum_mse_log']
-METRIC_HEADERS_PDE = ['Mean', 'Variance', 'Conv. Rate', 'Spectrum (log)']
+METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse_log']
+METRIC_HEADERS_PDE = ['Mean', 'Variance', 'Spectrum (log)']
 
 # Default for backwards compatibility
 METRICS = METRICS_ALL
@@ -212,63 +258,153 @@ def get_best_config_per_category(configs, categories: Dict = KERNEL_CATEGORIES) 
     """
     Find the best performing configuration for each kernel category.
     Best is determined by lowest average MSE across core metrics.
+    
+    Also includes sweep configs (sig_*, rbf_*, euclidean_*, gp_*_kernel_*) in their respective categories.
     """
     configs = normalize_configs(configs)
+    
+    # Extend categories to include sweep configs
+    extended_categories = {cat: list(names) for cat, names in categories.items()}
+    
+    # Map ot_kernel values to categories
+    ot_kernel_to_category = {
+        'signature': 'Signature',
+        'rbf': 'RBF',
+        'euclidean': 'Euclidean',
+    }
+    
+    # Add configs to appropriate categories based on their ot_kernel field
+    for config_name, config_data in configs.items():
+        # Skip baseline models
+        if config_name in ['DDPM', 'NCSN', 'independent']:
+            continue
+        
+        # Get the actual metrics data (might be nested or flattened)
+        if isinstance(config_data, dict):
+            if 'metrics' in config_data and isinstance(config_data['metrics'], dict):
+                actual_config = config_data['metrics']
+            elif 'quality_metrics' in config_data:
+                actual_config = config_data['quality_metrics']
+            else:
+                actual_config = config_data
+        else:
+            continue
+        
+        # Get OT-related fields
+        ot_kernel = actual_config.get('ot_kernel', '')
+        use_ot = actual_config.get('use_ot', False)
+        ot_method = actual_config.get('ot_method', '')
+        
+        # Skip non-OT configs and gaussian OT
+        if not use_ot or ot_method == 'gaussian':
+            continue
+        
+        # Categorize by ot_kernel field (most reliable)
+        if ot_kernel and ot_kernel.lower() in ot_kernel_to_category:
+            category = ot_kernel_to_category[ot_kernel.lower()]
+            if category in extended_categories and config_name not in extended_categories[category]:
+                extended_categories[category].append(config_name)
+        # Fallback: try to infer from config name
+        elif 'signature' in config_name.lower() or config_name.startswith('sig_'):
+            if 'Signature' in extended_categories and config_name not in extended_categories['Signature']:
+                extended_categories['Signature'].append(config_name)
+        elif 'rbf' in config_name.lower():
+            if 'RBF' in extended_categories and config_name not in extended_categories['RBF']:
+                extended_categories['RBF'].append(config_name)
+        elif 'euclidean' in config_name.lower():
+            if 'Euclidean' in extended_categories and config_name not in extended_categories['Euclidean']:
+                extended_categories['Euclidean'].append(config_name)
+    
     best_per_category = {}
     
-    # Core metrics for determining "best" (exclude convergence_rate and spectrum)
-    core_metrics = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse']
+    # All metrics we care about
+    all_metrics = [
+        'mean_mse', 'variance_mse', 'autocorrelation_mse', 
+        'spectrum_mse', 'spectrum_mse_log', 'density_mse',
+        'convergence_rate'
+    ]
     
-    for category_name, config_names in categories.items():
-        best_config = None
-        best_avg_mse = float('inf')
+    # Metrics where higher is better
+    higher_is_better = ['convergence_rate']
+    
+    for category_name, config_names in extended_categories.items():
+        # Collect all valid configs for this category
+        category_metrics_list = []
         
         for config_name in config_names:
             if config_name in configs:
                 config_data = configs[config_name]
                 
-                if 'quality_metrics' in config_data:
+                # Handle different data formats
+                if 'metrics' in config_data and isinstance(config_data['metrics'], dict):
+                    metrics = config_data['metrics']
+                elif 'quality_metrics' in config_data:
                     metrics = config_data['quality_metrics']
                 else:
                     metrics = config_data
                 
-                mse_values = []
-                for metric in core_metrics:
-                    val = metrics.get(metric)
-                    if val is not None:
-                        mse_values.append(val)
+                # Skip configs that aren't k-FFM (for non-Independent categories)
+                if category_name != 'Independent':
+                    use_ot = metrics.get('use_ot', config_data.get('use_ot', False))
+                    ot_method = metrics.get('ot_method', config_data.get('ot_method', ''))
+                    if use_ot != True or ot_method == 'gaussian':
+                        continue
                 
-                if mse_values:
-                    avg_mse = np.mean(mse_values)
-                    if avg_mse < best_avg_mse:
-                        best_avg_mse = avg_mse
-                        best_config = {
-                            'name': config_name,
-                            'metrics': metrics
-                        }
+                category_metrics_list.append(metrics)
         
-        if best_config:
-            best_per_category[category_name] = best_config
+        if category_metrics_list:
+            # Build best metrics by taking best value for each metric
+            best_metrics = {}
+            for metric in all_metrics:
+                values = [m.get(metric) for m in category_metrics_list 
+                         if m.get(metric) is not None and isinstance(m.get(metric), (int, float))]
+                if values:
+                    if metric in higher_is_better:
+                        best_metrics[metric] = max(values)
+                    else:
+                        best_metrics[metric] = min(values)
+            
+            if best_metrics:
+                best_per_category[category_name] = {
+                    'name': f'{category_name}_best',
+                    'metrics': best_metrics
+                }
     
     return best_per_category
 
 
-def format_value(value, precision: int = 2) -> str:
-    """Format a value for LaTeX table using consistent scientific notation (a.aa × 10^{-b})."""
+def format_value(value, precision: int = 2, rank: int = 0) -> str:
+    """Format a value for LaTeX table using consistent scientific notation (a.aa × 10^{-b}).
+    
+    Parameters
+    ----------
+    value : float or None
+        The value to format
+    precision : int
+        Number of decimal places for mantissa
+    rank : int
+        0 = no highlighting, 1 = best (green), 2 = second best (orange)
+    """
     if value is None:
         return '--'
     
     if value == 0:
-        return '$0$'
+        inner = '0'
+    else:
+        abs_val = abs(value)
+        # Always use scientific notation: a.aa × 10^{b}
+        exp = int(np.floor(np.log10(abs_val)))
+        mantissa = value / (10 ** exp)
+        inner = f'{mantissa:.{precision}f} \\times 10^{{{exp}}}'
     
-    abs_val = abs(value)
-    
-    # Always use scientific notation: a.aa × 10^{b}
-    exp = int(np.floor(np.log10(abs_val)))
-    mantissa = value / (10 ** exp)
-    
-    # Format mantissa with 2 decimal places
-    return f'${mantissa:.{precision}f} \\times 10^{{{exp}}}$'
+    if rank == 1:
+        # Best: green bold
+        return f'\\textcolor{{ForestGreen}}{{$\\mathbf{{{inner}}}$}}'
+    elif rank == 2:
+        # Second best: orange bold
+        return f'\\textcolor{{Orange}}{{$\\mathbf{{{inner}}}$}}'
+    else:
+        return f'${inner}$'
 
 
 def load_dataset_data(
@@ -290,6 +426,8 @@ def load_dataset_data(
         training_metrics.json files in the config directories
     ignore_gaussian : bool
         If True, exclude Gaussian kernel category from results
+        
+    Priority: aggregated_results > comprehensive_metrics > experiment_summary
     """
     dataset_info = DATASETS[dataset_key]
     dataset_dir = outputs_dir / dataset_info['dir']
@@ -297,26 +435,39 @@ def load_dataset_data(
     if not dataset_dir.exists():
         return None
     
-    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+    # First, try to load aggregated results (includes sweep experiments)
+    aggregated = load_aggregated_results(dataset_dir, dataset_key)
     
-    for summary_file in summary_files:
-        summary_path = dataset_dir / summary_file
-        if summary_path.exists():
-            with open(summary_path, 'r') as f:
-                summary = json.load(f)
-            break
+    if aggregated and 'configs' in aggregated:
+        # Extract configs from aggregated format (metrics are nested under 'metrics' key)
+        configs = {}
+        for config_name, config_data in aggregated['configs'].items():
+            if 'metrics' in config_data:
+                configs[config_name] = config_data['metrics']
+            else:
+                configs[config_name] = config_data
     else:
-        return None
-    
-    config_key = dataset_info.get('config_key', None)
-    if config_key:
-        if config_key not in summary:
+        # Fallback: load from summary files
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                break
+        else:
             return None
-        configs = summary[config_key]
-    elif 'configs' in summary:
-        configs = summary['configs']
-    else:
-        return None
+        
+        config_key = dataset_info.get('config_key', None)
+        if config_key:
+            if config_key not in summary:
+                return None
+            configs = summary[config_key]
+        elif 'configs' in summary:
+            configs = summary['configs']
+        else:
+            return None
     
     # Get best configs per category (with optional Gaussian filtering)
     categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
@@ -371,13 +522,20 @@ def find_best_per_metric(all_data: Dict) -> Dict[str, Dict[str, str]]:
 
 
 def generate_latex_table(outputs_dir: Path = None, output_file: Path = None, ignore_gaussian: bool = True) -> str:
-    """Generate a LaTeX table with all datasets and kernel categories."""
+    """Generate a LaTeX table with all datasets and kernel categories.
+    
+    Features:
+    - Best values in green, second best in orange
+    - Compact formatting with scriptsize
+    """
     if outputs_dir is None:
         script_dir = Path(__file__).parent
         outputs_dir = script_dir.parent / 'outputs'
     
     if output_file is None:
         output_file = outputs_dir / 'table1.tex'
+    
+    higher_is_better = ['convergence_rate']
     
     # Collect data from all datasets
     all_data = {}
@@ -393,24 +551,22 @@ def generate_latex_table(outputs_dir: Path = None, output_file: Path = None, ign
         print("No data found")
         return ""
     
-    # Find best values for highlighting
-    best_per_metric = find_best_per_metric(all_data)
-    
     # Kernel order (Independent first as N/A baseline, then others)
     kernel_order = ['Independent', 'Signature', 'RBF', 'Euclidean']
     if not ignore_gaussian:
         kernel_order.append('Gaussian')
     
-    # Build LaTeX table (table* for ICML double-column format)
+    # Build LaTeX table with compact formatting
     lines = []
-    
-    # Table header
     n_metrics = len(METRIC_HEADERS)
-    lines.append(r'\begin{table*}[t]')
+    
+    lines.append(r'\begin{table}[t]')
+    lines.append(r'\scriptsize')
+    lines.append(r'\setlength{\tabcolsep}{3pt}')
     lines.append(r'\centering')
-    lines.append(r'\caption{Performance comparison across datasets and OT kernel types. Best values per dataset are in \textbf{bold}.}')
+    lines.append(r'\caption{OT kernel comparison across all datasets. Lower is better. Best is \textcolor{ForestGreen}{$\mathbf{green}$}, second best is \textcolor{Orange}{$\mathbf{orange}$}.}')
     lines.append(r'\label{tab:performance_comparison}')
-    lines.append(r'\resizebox{\textwidth}{!}{%')
+    lines.append(r'\resizebox{\columnwidth}{!}{%')
     lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
     lines.append(r'\toprule')
     
@@ -424,33 +580,40 @@ def generate_latex_table(outputs_dir: Path = None, output_file: Path = None, ign
         dataset_title = data['title']
         best_configs = data['best_configs']
         
-        # Find best value for each metric within this dataset
-        dataset_best = {}
-        for metric in METRICS:
-            best_val = float('inf')
-            if metric == 'convergence_rate':
-                best_val = float('-inf')
-            for kernel in kernel_order:
-                if kernel in best_configs:
-                    val = best_configs[kernel]['metrics'].get(metric)
-                    if val is not None:
-                        if metric == 'convergence_rate':
-                            if val > best_val:
-                                best_val = val
-                        else:
-                            if val < best_val:
-                                best_val = val
-            dataset_best[metric] = best_val
-        
         available_kernels = [k for k in kernel_order if k in best_configs]
+        n_kernels = len(available_kernels)
         
+        # Find 1st and 2nd best values for each metric within this dataset
+        metric_ranks = {}  # {metric: {kernel: rank}}
+        for metric in METRICS:
+            is_higher_better = metric in higher_is_better
+            
+            # Collect (kernel, value) pairs
+            kernel_values = []
+            for kernel in available_kernels:
+                val = best_configs[kernel]['metrics'].get(metric)
+                if val is not None:
+                    kernel_values.append((kernel, val))
+            
+            # Sort by value
+            if is_higher_better:
+                kernel_values.sort(key=lambda x: x[1], reverse=True)
+            else:
+                kernel_values.sort(key=lambda x: x[1])
+            
+            # Assign ranks
+            metric_ranks[metric] = {}
+            for rank_idx, (kernel, _) in enumerate(kernel_values):
+                metric_ranks[metric][kernel] = rank_idx + 1
+        
+        # Generate rows for each kernel
         for i, kernel in enumerate(available_kernels):
             config = best_configs[kernel]
-            metrics = config['metrics']
+            config_metrics = config['metrics']
             
             # Dataset column (multirow for first row)
             if i == 0:
-                dataset_col = f'\\multirow{{5}}{{*}}{{{dataset_title}}}'
+                dataset_col = f'\\multirow{{{n_kernels}}}{{*}}{{{dataset_title}}}'
             else:
                 dataset_col = ''
             
@@ -460,16 +623,12 @@ def generate_latex_table(outputs_dir: Path = None, output_file: Path = None, ign
             # Metric values
             values = []
             for metric in METRICS:
-                val = metrics.get(metric)
-                formatted = format_value(val)
-                
-                # Bold if best in dataset
-                if val is not None and val == dataset_best[metric]:
-                    formatted = f'\\textbf{{{formatted}}}'
-                
+                val = config_metrics.get(metric)
+                rank = metric_ranks.get(metric, {}).get(kernel, 0)
+                formatted = format_value(val, rank=rank if rank <= 2 else 0)
                 values.append(formatted)
             
-            row = f'{dataset_col} & {kernel_col} & ' + ' & '.join(values) + r' \\'
+            row = f'{dataset_col}\n & {kernel_col} & ' + ' & '.join(values) + r' \\'
             lines.append(row)
         
         # Add midrule between datasets (except after last)
@@ -479,8 +638,8 @@ def generate_latex_table(outputs_dir: Path = None, output_file: Path = None, ign
     # Table footer
     lines.append(r'\bottomrule')
     lines.append(r'\end{tabular}')
-    lines.append(r'}')
-    lines.append(r'\end{table*}')
+    lines.append(r'} % end resizebox')
+    lines.append(r'\end{table}')
     
     # Join and save
     table_content = '\n'.join(lines)
@@ -501,9 +660,14 @@ def generate_subtable(
     metrics: List[str] = None,
     metric_headers: List[str] = None,
     ignore_gaussian: bool = True,
-    single_column: bool = False
+    single_column: bool = False,
+    higher_is_better: List[str] = None
 ) -> str:
     """Generate a LaTeX table for a specific subset of datasets.
+    
+    Features:
+    - Best values in green, second best in orange
+    - Compact formatting with scriptsize
     
     Parameters
     ----------
@@ -525,11 +689,15 @@ def generate_subtable(
         If True, exclude Gaussian kernel category from table
     single_column : bool
         If True, generate a single-column table (table instead of table*)
+    higher_is_better : List[str], optional
+        List of metric keys where higher is better (default: ['convergence_rate'])
     """
     if metrics is None:
         metrics = METRICS_ALL
     if metric_headers is None:
         metric_headers = METRIC_HEADERS_ALL
+    if higher_is_better is None:
+        higher_is_better = ['convergence_rate']
     
     # Collect data from specified datasets
     all_data = {}
@@ -551,26 +719,18 @@ def generate_subtable(
     if not ignore_gaussian:
         kernel_order.append('Gaussian')
     
-    # Build LaTeX table
+    # Build LaTeX table with compact formatting
     lines = []
     n_metrics = len(metric_headers)
     
-    if single_column:
-        # Single-column table (fits in one column of double-column layout)
-        lines.append(r'\begin{table}[t]')
-        lines.append(r'\centering')
-        lines.append(r'\small')
-        lines.append(f'\\caption{{{caption}}}')
-        lines.append(f'\\label{{{label}}}')
-        lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
-    else:
-        # Double-column table (spans full page width)
-        lines.append(r'\begin{table*}[t]')
-        lines.append(r'\centering')
-        lines.append(f'\\caption{{{caption}}}')
-        lines.append(f'\\label{{{label}}}')
-        lines.append(r'\resizebox{\textwidth}{!}{%')
-        lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
+    lines.append(r'\begin{table}[t]')
+    lines.append(r'\scriptsize')
+    lines.append(r'\setlength{\tabcolsep}{3pt}')
+    lines.append(r'\centering')
+    lines.append(f'\\caption{{{caption}}}')
+    lines.append(f'\\label{{{label}}}')
+    lines.append(r'\resizebox{\columnwidth}{!}{%')
+    lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
     lines.append(r'\toprule')
     
     header = 'Dataset & Kernel & ' + ' & '.join(metric_headers) + r' \\'
@@ -584,32 +744,39 @@ def generate_subtable(
         dataset_title = data['title']
         best_configs = data['best_configs']
         
-        # Find best value for each metric within this dataset
-        dataset_best = {}
-        for metric in metrics:
-            best_val = float('inf')
-            if metric == 'convergence_rate':
-                best_val = float('-inf')
-            for kernel in kernel_order:
-                if kernel in best_configs:
-                    val = best_configs[kernel]['metrics'].get(metric)
-                    if val is not None:
-                        if metric == 'convergence_rate':
-                            if val > best_val:
-                                best_val = val
-                        else:
-                            if val < best_val:
-                                best_val = val
-            dataset_best[metric] = best_val
-        
         available_kernels = [k for k in kernel_order if k in best_configs]
+        n_kernels = len(available_kernels)
         
+        # Find 1st and 2nd best values for each metric within this dataset
+        metric_ranks = {}  # {metric: {kernel: rank}}
+        for metric in metrics:
+            is_higher_better = metric in higher_is_better
+            
+            # Collect (kernel, value) pairs
+            kernel_values = []
+            for kernel in available_kernels:
+                val = best_configs[kernel]['metrics'].get(metric)
+                if val is not None:
+                    kernel_values.append((kernel, val))
+            
+            # Sort by value
+            if is_higher_better:
+                kernel_values.sort(key=lambda x: x[1], reverse=True)
+            else:
+                kernel_values.sort(key=lambda x: x[1])
+            
+            # Assign ranks
+            metric_ranks[metric] = {}
+            for rank_idx, (kernel, _) in enumerate(kernel_values):
+                metric_ranks[metric][kernel] = rank_idx + 1  # 1 = best, 2 = second best
+        
+        # Generate rows for each kernel
         for i, kernel in enumerate(available_kernels):
             config = best_configs[kernel]
             config_metrics = config['metrics']
             
             if i == 0:
-                dataset_col = f'\\multirow{{5}}{{*}}{{{dataset_title}}}'
+                dataset_col = f'\\multirow{{{n_kernels}}}{{*}}{{{dataset_title}}}'
             else:
                 dataset_col = ''
             
@@ -618,14 +785,11 @@ def generate_subtable(
             values = []
             for metric in metrics:
                 val = config_metrics.get(metric)
-                formatted = format_value(val)
-                
-                if val is not None and val == dataset_best[metric]:
-                    formatted = f'\\textbf{{{formatted}}}'
-                
+                rank = metric_ranks.get(metric, {}).get(kernel, 0)
+                formatted = format_value(val, rank=rank if rank <= 2 else 0)
                 values.append(formatted)
             
-            row = f'{dataset_col} & {kernel_col} & ' + ' & '.join(values) + r' \\'
+            row = f'{dataset_col}\n & {kernel_col} & ' + ' & '.join(values) + r' \\'
             lines.append(row)
         
         if dataset_key != dataset_keys_with_data[-1]:
@@ -633,11 +797,8 @@ def generate_subtable(
     
     lines.append(r'\bottomrule')
     lines.append(r'\end{tabular}')
-    if single_column:
-        lines.append(r'\end{table}')
-    else:
-        lines.append(r'}')  # Close resizebox
-        lines.append(r'\end{table*}')
+    lines.append(r'} % end resizebox')
+    lines.append(r'\end{table}')
     
     table_content = '\n'.join(lines)
     
@@ -660,12 +821,13 @@ def generate_sequence_table(outputs_dir: Path = None, output_file: Path = None, 
     return generate_subtable(
         outputs_dir=outputs_dir,
         dataset_keys=SEQUENCE_DATASETS,
-        caption='Performance comparison for sequence datasets. Best values per dataset are in \\textbf{bold}.',
-        label='tab:sequence_performance',
+        caption='OT kernel comparison for sequence datasets. Lower is better. Best is \\textcolor{ForestGreen}{$\\mathbf{green}$}, second best is \\textcolor{Orange}{$\\mathbf{orange}$}.',
+        label='tab:sequence_kernel',
         output_file=output_file,
         metrics=METRICS_SEQUENCE,
         metric_headers=METRIC_HEADERS_SEQUENCE,
-        ignore_gaussian=ignore_gaussian
+        ignore_gaussian=ignore_gaussian,
+        higher_is_better=['convergence_rate']
     )
 
 
@@ -681,13 +843,14 @@ def generate_pde_table(outputs_dir: Path = None, output_file: Path = None, ignor
     return generate_subtable(
         outputs_dir=outputs_dir,
         dataset_keys=PDE_DATASETS,
-        caption='Performance comparison for PDE datasets. Best values per dataset are in \\textbf{bold}.',
-        label='tab:pde_performance',
+        caption='OT kernel comparison for PDE datasets. Lower is better. Best is \\textcolor{ForestGreen}{$\\mathbf{green}$}, second best is \\textcolor{Orange}{$\\mathbf{orange}$}.',
+        label='tab:pde_kernel',
         output_file=output_file,
         metrics=METRICS_PDE,
         metric_headers=METRIC_HEADERS_PDE,
         ignore_gaussian=ignore_gaussian,
-        single_column=True  # PDE table fits in single column
+        single_column=True,
+        higher_is_better=['convergence_rate']
     )
 
 
@@ -785,9 +948,8 @@ def generate_compact_table(outputs_dir: Path = None, output_file: Path = None, i
             values = []
             for metric in compact_metrics:
                 val = metrics.get(metric)
-                formatted = format_value(val)
-                if val is not None and val == dataset_best[metric]:
-                    formatted = f'\\textbf{{{formatted}}}'
+                is_best = val is not None and val == dataset_best[metric]
+                formatted = format_value(val, rank=1 if is_best else 0)
                 values.append(formatted)
             
             lines.append(f'{dataset_col} & {kernel_col} & ' + ' & '.join(values) + r' \\')
@@ -816,9 +978,9 @@ def generate_compact_table(outputs_dir: Path = None, output_file: Path = None, i
 # Baseline model configurations to look for
 BASELINE_MODELS = ['DDPM', 'NCSN']
 
-# Metrics for baseline comparison
-BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 'autocorrelation_mse']
-BASELINE_HEADERS_SEQ = ['Mean', 'Var.', 'Skew.', 'Kurt.', 'Autocorr.']
+# Metrics for baseline comparison (only key metrics for single-column table)
+BASELINE_METRICS_SEQ = ['mean_mse', 'variance_mse', 'autocorrelation_mse']
+BASELINE_HEADERS_SEQ = ['Mean', 'Var.', 'Autocorr.']
 
 BASELINE_METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse_log']
 BASELINE_HEADERS_PDE = ['Mean', 'Variance', 'Spectrum (log)']
@@ -828,7 +990,12 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     """
     Get metrics for baseline models (DDPM, NCSN, FFM, k-FFM) for a dataset.
     
+    For k-FFM, we select the BEST value for each metric across all kernel variants,
+    not just one globally-selected configuration.
+    
     Returns dict with keys: 'DDPM', 'NCSN', 'FFM', 'k-FFM'
+    
+    Priority: aggregated_results > comprehensive_metrics > experiment_summary
     """
     dataset_info = DATASETS.get(dataset_key)
     if not dataset_info:
@@ -838,31 +1005,43 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     if not dataset_dir.exists():
         return None
     
-    # Load experiment summary
-    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
-    summary = None
-    for summary_file in summary_files:
-        summary_path = dataset_dir / summary_file
-        if summary_path.exists():
-            with open(summary_path, 'r') as f:
-                summary = json.load(f)
-            break
+    # First, try to load aggregated results (includes sweep experiments)
+    aggregated = load_aggregated_results(dataset_dir, dataset_key)
     
-    if not summary:
-        return None
-    
-    # Get configs
-    config_key = dataset_info.get('config_key', None)
-    if config_key:
-        if config_key not in summary:
-            return None
-        configs = summary[config_key]
-    elif 'configs' in summary:
-        configs = summary['configs']
+    if aggregated and 'configs' in aggregated:
+        # Use aggregated results - extract configs with proper format
+        configs = {}
+        for config_name, config_data in aggregated['configs'].items():
+            if 'metrics' in config_data:
+                configs[config_name] = config_data['metrics']
+            else:
+                configs[config_name] = config_data
     else:
-        return None
-    
-    configs = normalize_configs(configs)
+        # Fallback: Load experiment summary
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        summary = None
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                break
+        
+        if not summary:
+            return None
+        
+        # Get configs
+        config_key = dataset_info.get('config_key', None)
+        if config_key:
+            if config_key not in summary:
+                return None
+            configs = summary[config_key]
+        elif 'configs' in summary:
+            configs = summary['configs']
+        else:
+            return None
+        
+        configs = normalize_configs(configs)
     
     result = {}
     
@@ -883,35 +1062,87 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
         else:
             result['FFM'] = config_data
     
-    # Get k-FFM (best across all OT kernel types, excluding Gaussian and Independent)
-    ot_categories = {
-        'Signature': ['signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0'],
-        'RBF': ['rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0'],
-        'Euclidean': ['euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0'],
-    }
+    # Get k-FFM: for each metric, find the BEST value across all OT kernel types
+    # Focus on kernel-based OT methods (exclude gaussian_ot)
+    ot_config_names = [
+        # Signature kernel configs
+        'signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0',
+        'signature_sinkhorn_barycentric',
+        # RBF kernel configs
+        'rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0',
+        'rbf_sinkhorn_barycentric',
+        # Euclidean kernel configs
+        'euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0',
+        # NOTE: gaussian_ot is excluded - focusing on kernel methods
+    ]
     
-    best_ot_config = None
-    best_ot_avg_mse = float('inf')
-    core_metrics = ['mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 'autocorrelation_mse']
+    # Also include any config that looks like an OT kernel config (from sweeps)
+    # Exclude gaussian_* configs to focus on kernel methods
+    # IMPORTANT: Must verify use_ot=True for all sweep configs
+    for config_name in configs.keys():
+        if config_name not in ot_config_names and config_name not in ['DDPM', 'NCSN', 'independent', 'gaussian_ot']:
+            if config_name.startswith('gaussian'):
+                continue
+            
+            config_data = configs[config_name]
+            if not isinstance(config_data, dict):
+                continue
+            
+            # Get the actual metrics (might be nested under 'metrics' in aggregated results)
+            actual_data = config_data.get('metrics', config_data)
+            if 'quality_metrics' in actual_data:
+                actual_data = actual_data['quality_metrics']
+            
+            # Only include if use_ot=True and not gaussian method
+            use_ot = actual_data.get('use_ot', config_data.get('use_ot', False))
+            ot_method = actual_data.get('ot_method', config_data.get('ot_method', ''))
+            
+            if use_ot == True and ot_method != 'gaussian':
+                ot_config_names.append(config_name)
     
-    for category_name, config_names in ot_categories.items():
-        for config_name in config_names:
-            if config_name in configs:
-                config_data = configs[config_name]
-                if 'quality_metrics' in config_data:
-                    metrics = config_data['quality_metrics']
+    # All metrics we might want to compare
+    all_metrics = [
+        'mean_mse', 'variance_mse', 'kurtosis_mse', 'skewness_mse', 
+        'autocorrelation_mse', 'spectrum_mse', 'spectrum_mse_log', 'density_mse',
+        'convergence_rate'
+    ]
+    
+    # Collect all metrics from all OT configs (verify use_ot=True)
+    ot_metrics_list = []
+    for config_name in ot_config_names:
+        if config_name in configs:
+            config_data = configs[config_name]
+            
+            # Get metrics (might be nested)
+            if 'metrics' in config_data:
+                metrics = config_data['metrics']
+            elif 'quality_metrics' in config_data:
+                metrics = config_data['quality_metrics']
+            else:
+                metrics = config_data
+            
+            # Double-check use_ot=True (some configs might have slipped through)
+            use_ot = metrics.get('use_ot', config_data.get('use_ot', False))
+            ot_method = metrics.get('ot_method', config_data.get('ot_method', ''))
+            
+            if use_ot == True and ot_method != 'gaussian':
+                ot_metrics_list.append(metrics)
+    
+    if ot_metrics_list:
+        # Build k-FFM metrics by taking the best value for each metric
+        # For convergence_rate, higher is better; for all others, lower is better
+        kffm_metrics = {}
+        for metric in all_metrics:
+            values = [m.get(metric) for m in ot_metrics_list 
+                     if m.get(metric) is not None and isinstance(m.get(metric), (int, float))]
+            if values:
+                if metric == 'convergence_rate':
+                    kffm_metrics[metric] = max(values)  # Higher is better
                 else:
-                    metrics = config_data
-                
-                mse_values = [metrics.get(m) for m in core_metrics if metrics.get(m) is not None]
-                if mse_values:
-                    avg_mse = np.mean(mse_values)
-                    if avg_mse < best_ot_avg_mse:
-                        best_ot_avg_mse = avg_mse
-                        best_ot_config = metrics
-    
-    if best_ot_config:
-        result['k-FFM'] = best_ot_config
+                    kffm_metrics[metric] = min(values)  # Lower is better
+        
+        if kffm_metrics:
+            result['k-FFM'] = kffm_metrics
     
     return result if result else None
 
@@ -924,9 +1155,18 @@ def generate_baseline_comparison_table(
     caption: str,
     label: str,
     output_file: Path,
-    single_column: bool = False
+    single_column: bool = False,
+    higher_is_better: List[str] = None
 ) -> str:
-    """Generate baseline comparison table (DDPM, NCSN, FFM, k-FFM)."""
+    """Generate baseline comparison table (DDPM, NCSN, FFM, k-FFM).
+    
+    Features:
+    - Best values in green, second best in orange
+    - k-FFM rows have gray background
+    - Compact formatting with scriptsize
+    """
+    if higher_is_better is None:
+        higher_is_better = ['convergence_rate']
     
     # Collect data
     all_data = {}
@@ -948,22 +1188,17 @@ def generate_baseline_comparison_table(
     lines = []
     n_metrics = len(metric_headers)
     
-    if single_column:
-        lines.append(r'\begin{table}[t]')
-        lines.append(r'\centering')
-        lines.append(r'\small')
-        lines.append(f'\\caption{{{caption}}}')
-        lines.append(f'\\label{{{label}}}')
-        lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
-    else:
-        lines.append(r'\begin{table*}[t]')
-        lines.append(r'\centering')
-        lines.append(f'\\caption{{{caption}}}')
-        lines.append(f'\\label{{{label}}}')
-        lines.append(r'\resizebox{\textwidth}{!}{%')
-        lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
-    
+    # Table preamble with compact formatting
+    lines.append(r'\begin{table}[t]')
+    lines.append(r'\scriptsize')
+    lines.append(r'\setlength{\tabcolsep}{3pt}')
+    lines.append(r'\centering')
+    lines.append(f'\\caption{{{caption}}}')
+    lines.append(f'\\label{{{label}}}')
+    lines.append(r'\resizebox{\columnwidth}{!}{%')
+    lines.append(r'\begin{tabular}{ll' + 'r' * n_metrics + '}')
     lines.append(r'\toprule')
+    
     header = 'Dataset & Model & ' + ' & '.join(metric_headers) + r' \\'
     lines.append(header)
     lines.append(r'\midrule')
@@ -975,20 +1210,33 @@ def generate_baseline_comparison_table(
         dataset_title = data['title']
         models = data['models']
         
-        # Find best value for each metric within this dataset
-        dataset_best = {}
-        for metric in metrics:
-            best_val = float('inf')
-            for model in model_order:
-                if model in models:
-                    val = models[model].get(metric)
-                    if val is not None and val < best_val:
-                        best_val = val
-            dataset_best[metric] = best_val if best_val != float('inf') else None
-        
         available_models = [m for m in model_order if m in models]
         n_models = len(available_models)
         
+        # Find 1st and 2nd best values for each metric within this dataset
+        metric_ranks = {}  # {metric: {model: rank}}
+        for metric in metrics:
+            is_higher_better = metric in higher_is_better
+            
+            # Collect (model, value) pairs
+            model_values = []
+            for model in available_models:
+                val = models[model].get(metric)
+                if val is not None:
+                    model_values.append((model, val))
+            
+            # Sort by value
+            if is_higher_better:
+                model_values.sort(key=lambda x: x[1], reverse=True)
+            else:
+                model_values.sort(key=lambda x: x[1])
+            
+            # Assign ranks
+            metric_ranks[metric] = {}
+            for rank_idx, (model, _) in enumerate(model_values):
+                metric_ranks[metric][model] = rank_idx + 1  # 1 = best, 2 = second best
+        
+        # Generate rows for each model
         for i, model in enumerate(available_models):
             model_metrics = models[model]
             
@@ -997,17 +1245,20 @@ def generate_baseline_comparison_table(
             else:
                 dataset_col = ''
             
+            # Build value cells
             values = []
             for metric in metrics:
                 val = model_metrics.get(metric)
-                formatted = format_value(val)
+                rank = metric_ranks.get(metric, {}).get(model, 0)
+                formatted = format_value(val, rank=rank if rank <= 2 else 0)
                 
-                if val is not None and dataset_best.get(metric) is not None and val == dataset_best[metric]:
-                    formatted = f'\\textbf{{{formatted}}}'
+                # Add gray background for k-FFM
+                if model == 'k-FFM':
+                    formatted = f'\\cellcolor[gray]{{0.9}}{formatted}'
                 
                 values.append(formatted)
             
-            row = f'{dataset_col} & {model} & ' + ' & '.join(values) + r' \\'
+            row = f'{dataset_col}\n & {model} & ' + ' & '.join(values) + r' \\'
             lines.append(row)
         
         if dataset_key != dataset_keys_with_data[-1]:
@@ -1015,12 +1266,8 @@ def generate_baseline_comparison_table(
     
     lines.append(r'\bottomrule')
     lines.append(r'\end{tabular}')
-    
-    if single_column:
-        lines.append(r'\end{table}')
-    else:
-        lines.append(r'}')
-        lines.append(r'\end{table*}')
+    lines.append(r'} % end resizebox')
+    lines.append(r'\end{table}')
     
     table_content = '\n'.join(lines)
     
@@ -1032,7 +1279,7 @@ def generate_baseline_comparison_table(
 
 
 def generate_baseline_seq_table(outputs_dir: Path = None, output_file: Path = None) -> str:
-    """Generate baseline comparison table for sequence datasets."""
+    """Generate baseline comparison table for sequence datasets (single-column, key metrics only)."""
     if outputs_dir is None:
         script_dir = Path(__file__).parent
         outputs_dir = script_dir.parent / 'outputs'
@@ -1045,10 +1292,10 @@ def generate_baseline_seq_table(outputs_dir: Path = None, output_file: Path = No
         dataset_keys=SEQUENCE_DATASETS,
         metrics=BASELINE_METRICS_SEQ,
         metric_headers=BASELINE_HEADERS_SEQ,
-        caption='Baseline comparison for sequence datasets. Best values per dataset are in \\textbf{bold}.',
+        caption='Baseline comparison for sequence datasets. Lower is better. Best is \\textcolor{ForestGreen}{$\\mathbf{green}$}, second best is \\textcolor{Orange}{$\\mathbf{orange}$}.',
         label='tab:baseline_seq',
         output_file=output_file,
-        single_column=False
+        single_column=True
     )
 
 
@@ -1066,10 +1313,11 @@ def generate_baseline_pde_table(outputs_dir: Path = None, output_file: Path = No
         dataset_keys=PDE_DATASETS,
         metrics=BASELINE_METRICS_PDE,
         metric_headers=BASELINE_HEADERS_PDE,
-        caption='Baseline comparison for PDE datasets. Best values per dataset are in \\textbf{bold}.',
+        caption='Baseline comparison for PDE datasets. Lower is better (higher for Conv.\\ Rate). Best is \\textcolor{ForestGreen}{$\\mathbf{green}$}, second best is \\textcolor{Orange}{$\\mathbf{orange}$}.',
         label='tab:baseline_pde',
         output_file=output_file,
-        single_column=True  # Fewer columns, fits in single column
+        single_column=True,
+        higher_is_better=['convergence_rate']
     )
 
 

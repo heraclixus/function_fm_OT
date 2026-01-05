@@ -16,6 +16,8 @@ Data shape: (N=512, T=201) - a single trajectory
 Usage:
     python kdv_ot.py
     python kdv_ot.py --epochs 200 --n_seeds 3
+    python kdv_ot.py --config-file ../configs/kdv_sweep.yaml --config euclidean_reg0.05 --seed 1
+    python kdv_ot.py --list-configs
 """
 
 import sys
@@ -73,6 +75,20 @@ parser.add_argument('--batch_size', type=int, default=16, help='Batch size')
 parser.add_argument('--batch_size_sig', type=int, default=16, help='Batch size for signature kernel')
 parser.add_argument('--load-only', action='store_true', help='Load saved results instead of training')
 parser.add_argument('--baselines-only', action='store_true', help='Run only DDPM and NCSN baselines')
+parser.add_argument('--config-file', type=str, default=None,
+                    help='Path to a YAML or JSON file containing OT configurations')
+parser.add_argument('--config', type=str, default=None,
+                    help='Run only this specific configuration (for sweep parallelization)')
+parser.add_argument('--seed', type=int, default=None,
+                    help='Run only this specific seed (for sweep parallelization)')
+parser.add_argument('--list-configs', action='store_true',
+                    help='List all available configs and exit')
+parser.add_argument('--modes', type=int, default=None,
+                    help='Override FNO modes (default: 64)')
+parser.add_argument('--kernel-length', type=float, default=None,
+                    help='Override GP kernel_length (default: 0.01)')
+parser.add_argument('--kernel-variance', type=float, default=None,
+                    help='Override GP kernel_variance (default: 0.1)')
 args, _ = parser.parse_known_args()
 
 # Load data
@@ -305,6 +321,42 @@ OT_CONFIGS = {
 }
 
 # =============================================================================
+# Config loading functions
+# =============================================================================
+
+def load_configs_from_file(file_path: Path) -> Dict:
+    """Load configurations from a YAML or JSON file."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Config file not found: {file_path}")
+    
+    if file_path.suffix in ['.yaml', '.yml']:
+        import yaml
+        with open(file_path, 'r') as f:
+            return yaml.safe_load(f)
+    elif file_path.suffix == '.json':
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    else:
+        raise ValueError(f"Unsupported config file format: {file_path.suffix}. Use .yaml, .yml, or .json")
+
+
+def get_all_configs() -> Dict:
+    """Get all OT configurations, merging built-in with external if provided."""
+    configs = dict(OT_CONFIGS)
+    if args.config_file:
+        external_configs = load_configs_from_file(Path(args.config_file))
+        configs.update(external_configs)
+    return configs
+
+
+def get_fno_modes(config: dict) -> int:
+    """Get FNO modes: prioritize command-line args > config > default."""
+    if args.modes:
+        return args.modes
+    return config.get("fno_modes", modes)
+
+
+# =============================================================================
 # Baseline Configurations (DDPM, NCSN) - Not OT methods
 # =============================================================================
 
@@ -328,10 +380,11 @@ BASELINE_CONFIGS = {
 # Training Functions
 # =============================================================================
 
-def create_model(device):
+def create_model(device, fno_modes: int = None):
     """Create FNO model."""
+    m = fno_modes if fno_modes else modes
     return FNO(
-        modes,
+        m,
         vis_channels=1,
         hidden_channels=width,
         proj_channels=mlp_width,
@@ -342,9 +395,13 @@ def create_model(device):
 
 def build_ffm_kwargs(config: dict) -> dict:
     """Build kwargs for FFMModelOT from config dict."""
+    # GP prior: prioritize command-line args > config > defaults
+    kl = args.kernel_length if args.kernel_length else config.get("gp_kernel_length", kernel_length)
+    kv = args.kernel_variance if args.kernel_variance else config.get("gp_kernel_variance", kernel_variance)
+    
     kwargs = {
-        "kernel_length": kernel_length,
-        "kernel_variance": kernel_variance,
+        "kernel_length": kl,
+        "kernel_variance": kv,
         "sigma_min": sigma_min,
         "device": device,
         "dtype": torch.float32,
@@ -381,7 +438,8 @@ def train_single_config(
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    model = create_model(device)
+    fno_modes = get_fno_modes(config)
+    model = create_model(device, fno_modes=fno_modes)
     ffm_kwargs = build_ffm_kwargs(config)
     ffm = FFMModelOT(model, **ffm_kwargs)
     
@@ -531,12 +589,47 @@ def run_baseline_experiments() -> Dict[str, Dict[str, Any]]:
     return all_results
 
 
+def run_single_config_with_seeds(
+    config_name: str,
+    seeds_to_run: list,
+    config: dict,
+) -> Dict[str, Dict[int, Dict]]:
+    """Run a single configuration with specified seeds."""
+    all_results = {}
+    
+    print(f"\n{'='*60}")
+    print(f"Configuration: {config_name}")
+    print(f"{'='*60}")
+    
+    loader = train_loader_signature if config.get("ot_kernel") == "signature" else train_loader
+    
+    config_results = {}
+    for seed in seeds_to_run:
+        config_dir = spath / config_name / f"seed_{seed}"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        result = train_single_config(
+            config_name=config_name,
+            config=config,
+            seed=seed,
+            train_loader=loader,
+            ground_truth=ground_truth,
+            save_dir=config_dir,
+        )
+        
+        config_results[seed] = result
+    
+    all_results[config_name] = config_results
+    return all_results
+
+
 def run_all_experiments() -> Dict[str, Dict[int, Dict]]:
     """Run all configurations with all seeds."""
     
     all_results = {}
+    all_configs = get_all_configs()
     
-    for config_name, config in OT_CONFIGS.items():
+    for config_name, config in all_configs.items():
         print(f"\n{'='*60}")
         print(f"Configuration: {config_name}")
         print(f"{'='*60}")
@@ -572,7 +665,7 @@ def load_all_results(include_baselines: bool = True) -> Dict[str, Dict[int, Dict
     
     all_results = {}
     
-    all_configs = dict(OT_CONFIGS)
+    all_configs = get_all_configs()
     if include_baselines:
         all_configs.update(BASELINE_CONFIGS)
     
@@ -751,12 +844,27 @@ def create_summary_report(aggregated: Dict, save_path: Path):
 # =============================================================================
 
 if __name__ == "__main__":
+    # Handle --list-configs
+    if args.list_configs:
+        all_configs = get_all_configs()
+        print("Available configurations:")
+        for name in sorted(all_configs.keys()):
+            cfg = all_configs[name]
+            ot_type = "OT" if cfg.get("use_ot", False) else "no-OT"
+            kernel = cfg.get("ot_kernel", "") or ""
+            print(f"  {name}: {ot_type}, kernel={kernel}")
+        sys.exit(0)
+    
+    all_configs = get_all_configs()
+    
     print("="*60)
     print(f"OT-FFM Experiments on KdV")
     print(f"WARNING: Very limited data (only ~160 training samples)")
-    print(f"Configs: {len(OT_CONFIGS)}, Seeds: {n_seeds}")
+    print(f"Configs: {len(all_configs)}, Seeds: {n_seeds}")
     print(f"Output: {spath}")
-    if args.baselines_only:
+    if args.config:
+        print(f"MODE: Single config ({args.config}, seed={args.seed if args.seed else 'all'})")
+    elif args.baselines_only:
         print("MODE: Baselines-only (running DDPM and NCSN only)")
     elif args.load_only:
         print("MODE: Load-only (loading saved results)")
@@ -764,7 +872,23 @@ if __name__ == "__main__":
         print("MODE: Training (running experiments)")
     print("="*60)
     
-    if args.baselines_only:
+    if args.config:
+        # Single config mode (for parallelization)
+        seeds_to_run = [args.seed] if args.seed else random_seeds
+        if args.config not in all_configs:
+            print(f"ERROR: Config '{args.config}' not found in built-in or external configs.")
+            print(f"Available configs: {list(all_configs.keys())}")
+            sys.exit(1)
+        
+        all_results = run_single_config_with_seeds(args.config, seeds_to_run, all_configs[args.config])
+        
+        # Aggregate and save for single config
+        aggregated = aggregate_results(all_results)
+        for cname, data in aggregated.items():
+            data['mean_quality'].save(spath / cname / 'aggregated_quality.json')
+        print(f"\nCompleted {args.config} with seeds {seeds_to_run}")
+        sys.exit(0)
+    elif args.baselines_only:
         baseline_results = run_baseline_experiments()
         ot_results = load_all_results(include_baselines=False)
         all_results = {**ot_results, **baseline_results}

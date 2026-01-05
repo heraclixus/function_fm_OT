@@ -1,0 +1,146 @@
+# =============================================================================
+# All Sweep Commands - Run one by one manually
+# =============================================================================
+# Usage: Copy and paste each line into terminal (from scripts/ directory)
+# Each command runs a single config with seed 1
+# =============================================================================
+
+# =============================================================================
+# ECON1 - Autocorrelation Focus (29 configs)
+# =============================================================================
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config euclidean_reg2.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config euclidean_reg5.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config euclidean_reg10.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_sigma1.0_reg2.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_sigma1.0_reg5.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config sig_reg2.0 --seed 1 --dataset econ1_population
+python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config sig_reg5.0 --seed 1 --dataset econ1_population
+CUDA_VISIBLE_DEVICES=2 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl0.5_euclidean --seed 1 --dataset econ1_population &> log_econ8.txt & 
+CUDA_VISIBLE_DEVICES=2 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl0.2_euclidean --seed 1 --dataset econ1_population &> log_econ9.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl0.1_euclidean --seed 1 --dataset econ1_population &> log_econ10.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl2.0_euclidean --seed 1 --dataset econ1_population &> log_econ11.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl5.0_euclidean --seed 1 --dataset econ1_population &> log_econ12.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl0.5_sig --seed 1 --dataset econ1_population &> log_econ13.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config gp_kl0.2_sig --seed 1 --dataset econ1_population &> log_econ14.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_exact_sigma0.5 --seed 1 --dataset econ1_population &> log_econ15.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_exact_sigma0.1 --seed 1 --dataset econ1_population &> log_econ16.txt &
+CUDA_VISIBLE_DEVICES=4 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_exact_sigma2.0 --seed 1 --dataset econ1_population &> log_econ17.txt &
+CUDA_VISIBLE_DEVICES=4 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config euclidean_exact_gp0.5 --seed 1 --dataset econ1_population &> log_econ18.txt &
+CUDA_VISIBLE_DEVICES=4 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config euclidean_exact_gp0.2 --seed 1 --dataset econ1_population &> log_econ19.txt &
+CUDA_VISIBLE_DEVICES=5 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_sigma0.1_reg0.5 --seed 1 --dataset econ1_population &> log_econ20.txt &
+CUDA_VISIBLE_DEVICES=5 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_sigma0.2_reg0.5 --seed 1 --dataset econ1_population &> log_econ21.txt &
+CUDA_VISIBLE_DEVICES=5 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config rbf_sigma0.05_reg0.5 --seed 1 --dataset econ1_population &> log_econ22.txt &
+CUDA_VISIBLE_DEVICES=5 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config combo_reg2_gp0.5 --seed 1 --dataset econ1_population &> log_econ23.txt &
+CUDA_VISIBLE_DEVICES=6 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config combo_reg2_gp0.2_rbf --seed 1 --dataset econ1_population &> log_econ24.txt &
+CUDA_VISIBLE_DEVICES=6 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config combo_exact_gp0.2_rbf0.5 --seed 1 --dataset econ1_population &> log_econ25.txt &
+CUDA_VISIBLE_DEVICES=6 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config combo_reg5_gp0.5_sig --seed 1 --dataset econ1_population &> log_econ26.txt &
+CUDA_VISIBLE_DEVICES=6 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config independent_gp0.5 --seed 1 --dataset econ1_population &> log_econ27.txt &
+CUDA_VISIBLE_DEVICES=7 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config independent_gp0.2 --seed 1 --dataset econ1_population &> log_econ28.txt &
+CUDA_VISIBLE_DEVICES=7 python econ_ot.py --config-file ../configs/econ_autocorr_phase2.yaml --config independent_gp2.0 --seed 1 --dataset econ1_population &> log_econ29.txt &
+
+# =============================================================================
+# KdV - Spectrum Log Focus (21 configs)
+# =============================================================================
+CUDA_VISIBLE_DEVICES=0 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config gp_kl0.02_reg0.1 --seed 1  &> log_kdv1.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config gp_kl0.05_reg0.1 --seed 1  &> log_kdv2.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config gp_kl0.1_reg0.1 --seed 1  &> log_kdv3.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config gp_kl0.005_reg0.1 --seed 1  &> log_kdv4.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config gp_kl0.002_reg0.1 --seed 1  &> log_kdv5.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config fno_modes32_reg0.1 --seed 1  &> log_kdv6.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config fno_modes48_reg0.1 --seed 1  &> log_kdv7.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config fno_modes96_reg0.1 --seed 1  &> log_kdv8.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config fno_modes128_reg0.1 --seed 1  &> log_kdv9.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config euclidean_reg0.05 --seed 1  &> log_kdv10.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config euclidean_reg0.02 --seed 1  &> log_kdv11.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config euclidean_reg0.01 --seed 1  &> log_kdv12.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config rbf_sigma1.0_reg0.1 --seed 1  &> log_kdv13.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config rbf_sigma5.0_reg0.1 --seed 1  &> log_kdv14.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config rbf_sigma50.0_reg0.1 --seed 1  &> log_kdv15.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config combo_smooth_gp_modes48 --seed 1  &> log_kdv16.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config combo_smooth_gp_modes96 --seed 1  &> log_kdv17.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config combo_rough_gp_modes128 --seed 1  &> log_kdv18.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config sig_order2_reg0.1 --seed 1  &> log_kdv19.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config sig_leadlag_order2_reg0.1 --seed 1  &> log_kdv20.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python kdv_ot.py --config-file ../configs/kdv_spectrum_focus.yaml --config sig_smooth_gp --seed 1  &> log_kdv21.txt &
+
+# =============================================================================
+# Navier-Stokes - Spectrum Log Focus (23 configs)
+# =============================================================================
+CUDA_VISIBLE_DEVICES=0 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config euclidean_sinkhorn_reg0.3 --seed 1 &> log_ns1.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config euclidean_sinkhorn_reg0.4 --seed 1 &> log_ns2.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config euclidean_sinkhorn_reg0.6 --seed 1 &> log_ns3.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config euclidean_sinkhorn_reg0.7 --seed 1 &> log_ns4.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config rbf_sinkhorn_reg0.3 --seed 1 &> log_ns5.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config rbf_sinkhorn_reg0.4 --seed 1 &> log_ns6.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config gp_kl0.005_reg0.5 --seed 1 &> log_ns7.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config gp_kl0.01_reg0.5 --seed 1 &> log_ns8.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config gp_kl0.02_reg0.5 --seed 1 &> log_ns9.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config gp_kl0.05_reg0.5 --seed 1 &> log_ns10.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config modes24_reg0.5 --seed 1 &> log_ns11.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config modes32_reg0.5 --seed 1 &> log_ns12.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config modes12_reg0.5 --seed 1 &> log_ns13.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config modes24_independent --seed 1 &> log_ns14.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config modes32_independent --seed 1 &> log_ns15.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config rbf_sigma5.0_reg0.5 --seed 1 &> log_ns16.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config rbf_sigma20.0_reg0.5 --seed 1 &> log_ns17.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config rbf_sigma50.0_reg0.5 --seed 1 &> log_ns18.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config combo_gp0.01_modes24 --seed 1 &> log_ns19.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config combo_gp0.02_modes32 --seed 1 &> log_ns20.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config combo_gp0.05_modes24_reg0.4 --seed 1 &> log_ns21.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config combo_rbf_gp0.02_sigma20 --seed 1 &> log_ns22.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python navier_stokes_ot.py --config-file ../configs/navier_stokes_spectrum_focus.yaml --config combo_rbf_gp0.01_sigma10_modes24 --seed 1 &> log_ns23.txt &
+
+# =============================================================================
+# rBergomi - Phase 2 Autocorrelation Focus (28 configs)
+# =============================================================================
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gaussian_ot_reg1e-2 --seed 1 &> log_rbergomi1.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gaussian_ot_reg1e-4 --seed 1 &> log_rbergomi2.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gaussian_ot_reg1e-5 --seed 1 &> log_rbergomi3.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gaussian_ot_sample --seed 1 &> log_rbergomi4.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_exact_sigma0.1 --seed 1 &> log_rbergomi5.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_exact_sigma0.5 --seed 1 &> log_rbergomi6.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_exact_sigma0.2 --seed 1 &> log_rbergomi7.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_exact_gp0.5 --seed 1 &> log_rbergomi8.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_exact_gp0.2 --seed 1 &> log_rbergomi9.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gp_kl0.5_reg0.1 --seed 1 &> log_rbergomi10.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gp_kl0.2_reg0.1 --seed 1 &> log_rbergomi11.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gp_kl0.1_reg0.1 --seed 1 &> log_rbergomi12.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config gp_kl2.0_reg0.1 --seed 1 &> log_rbergomi13.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_gp0.5_reg0.1 --seed 1 &> log_rbergomi14.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_gp0.2_reg0.1 --seed 1 &> log_rbergomi15.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_sigma0.5_reg0.01 --seed 1 &> log_rbergomi16.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_sigma0.5_reg0.005 --seed 1 &> log_rbergomi17.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_reg0.01 --seed 1 &> log_rbergomi18.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config euclidean_reg0.005 --seed 1 &> log_rbergomi19.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config combo_gp0.5_sigma0.5_reg0.05 --seed 1 &> log_rbergomi20.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config combo_gp0.2_sigma0.2_reg0.05 --seed 1 &> log_rbergomi21.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config combo_exact_gp0.5_sigma0.5 --seed 1 &> log_rbergomi22.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_sigma0.5_reg0.5 --seed 1 &> log_rbergomi23.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config rbf_sigma0.5_reg1.0 --seed 1 &> log_rbergomi24.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config sig_gp0.5 --seed 1 &> log_rbergomi25.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/rbergomi_phase2_sweep.yaml --config sig_gp0.2_sigma0.1 --seed 1 &> log_rbergomi26.txt &
+
+# =============================================================================
+# Stochastic KdV - Mean/Spectrum Focus (16 configs)
+# =============================================================================
+CUDA_VISIBLE_DEVICES=0 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config euclidean_reg0.005 --seed 1 &> log_sto_kdv1.txt &
+CUDA_VISIBLE_DEVICES=0 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config euclidean_reg0.001 --seed 1 &> log_sto_kdv2.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.5_reg0.01 --seed 1 &> log_sto_kdv3.txt &
+CUDA_VISIBLE_DEVICES=2 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.5_reg0.005 --seed 1 &> log_sto_kdv4.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.1_reg0.05 --seed 1 &> log_sto_kdv5.txt &
+CUDA_VISIBLE_DEVICES=4 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.2_reg0.05 --seed 1 &> log_sto_kdv6.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.3_reg0.05 --seed 1 &> log_sto_kdv7.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.1_reg0.01 --seed 1 &> log_sto_kdv8.txt &
+CUDA_VISIBLE_DEVICES=7 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config gp_kl0.02 --seed 1 &> log_sto_kdv9.txt &
+CUDA_VISIBLE_DEVICES=7 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config gp_kl0.05 --seed 1 &> log_sto_kdv10.txt &
+CUDA_VISIBLE_DEVICES=1 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config gp_kl0.005_kv0.2 --seed 1 &> log_sto_kdv11.txt &
+CUDA_VISIBLE_DEVICES=3 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.5_gp_kl0.02 --seed 1 &> log_sto_kdv12.txt &
+CUDA_VISIBLE_DEVICES=6 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config sig_reg0.05_sigma0.5 --seed 1 &> log_sto_kdv13.txt &
+CUDA_VISIBLE_DEVICES=5 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config sig_reg0.01_order2 --seed 1 &> log_sto_kdv14.txt &
+CUDA_VISIBLE_DEVICES=6 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.5_exact --seed 1 &> log_sto_kdv15.txt &
+CUDA_VISIBLE_DEVICES=7 nohup python stochastic_kdv_ot.py --config-file ../configs/stochastic_kdv_mean_focus.yaml --config rbf_sigma0.2_exact --seed 1 &> log_sto_kdv16.txt &
+
+# =============================================================================
+# TOTAL: 117 experiments
+# =============================================================================
+

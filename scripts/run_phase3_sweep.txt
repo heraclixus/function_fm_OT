@@ -1,0 +1,129 @@
+# =============================================================================
+# Phase 3 Improvement Sweep Commands
+# Configuration file: configs/phase3_improvement_sweep.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PRIORITY 1: rBergomi (2.8x gap on autocorrelation_mse)
+# Most promising: Signature kernel with higher orders & exact OT
+# -----------------------------------------------------------------------------
+
+# Signature with higher dyadic orders (capture more path structure)
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts && \
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_leadlag_order4 --seed 1
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_leadlag_order5 --seed 1
+
+# Signature with EXACT OT (no regularization artifacts)
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_exact_leadlag --seed 1
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_exact_order3 --seed 1
+
+# Very small static kernel sigma for rough paths
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_sigma0.05 --seed 1
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_sigma0.01 --seed 1
+
+# Longer sequence and unnormalized variants
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_longseq128 --seed 1
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_unnorm_leadlag --seed 1
+
+# Euclidean exact with GP tuning
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_euclidean_exact_gp0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_euclidean_exact_gp0.05 --seed 1
+
+
+# -----------------------------------------------------------------------------
+# PRIORITY 2: KdV (35% gap on spectrum_mse_log)
+# Most promising: Euclidean with smooth GP prior + high FNO modes
+# -----------------------------------------------------------------------------
+
+# Very smooth GP priors
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts && \
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_gp_kl0.2_reg0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_gp_kl0.5_reg0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_gp_kl1.0_reg0.1 --seed 1
+
+# Higher FNO modes
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_fno_modes256_reg0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_fno_modes192_gp0.05 --seed 1
+
+# Large sigma RBF
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_rbf_sigma100_reg0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_rbf_sigma200_reg0.1 --seed 1
+
+# Combined strategies
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_combo_smooth --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_combo_verysmooth --seed 1
+
+# Exact OT
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_euclidean_exact_gp0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config kdv_rbf_exact_sigma50 --seed 1
+
+
+# -----------------------------------------------------------------------------
+# PRIORITY 3: Stochastic KdV (10x gap on spectrum_mse_log)
+# Most promising: RBF exact/ultra-low reg + GP prior tuning
+# -----------------------------------------------------------------------------
+
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts && \
+# Exact OT variants
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_rbf_exact_sigma0.1 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_rbf_exact_sigma0.3 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_euclidean_exact --seed 1
+
+# GP prior tuning
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_gp_kl0.05_rbf --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_gp_kl0.1_rbf --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_gp_kl0.2_euclidean --seed 1
+
+# Ultra-low regularization
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_euclidean_reg0.001 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_rbf_sigma0.5_reg0.001 --seed 1
+
+# Large sigma RBF (smooth spectral coupling)
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_rbf_sigma50_reg0.05 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_rbf_sigma100_reg0.05 --seed 1
+
+# Signature kernel for spectrum
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_sig_order3_reg0.05 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_kdv_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_kdv_sig_exact_order2 --seed 1
+
+
+# -----------------------------------------------------------------------------
+# OPTIONAL: Navier-Stokes (already winning - fine-tune further)
+# -----------------------------------------------------------------------------
+
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts && \
+CUDA_VISIBLE_DEVICES=0 python navier_stokes_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config ns_euclidean_reg0.45 --seed 1
+CUDA_VISIBLE_DEVICES=0 python navier_stokes_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config ns_euclidean_reg0.55 --seed 1
+CUDA_VISIBLE_DEVICES=0 python navier_stokes_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config ns_gp_kl0.002_reg0.5 --seed 1
+
+
+# -----------------------------------------------------------------------------
+# OPTIONAL: Stochastic NS (already winning big - fine-tune further)
+# -----------------------------------------------------------------------------
+
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts && \
+CUDA_VISIBLE_DEVICES=0 python stochastic_ns_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_ns_rbf_reg0.05 --seed 1
+CUDA_VISIBLE_DEVICES=0 python stochastic_ns_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config stoch_ns_rbf_exact_sigma10 --seed 1
+
+
+# =============================================================================
+# PARALLEL EXECUTION (run multiple experiments at once on different GPUs)
+# =============================================================================
+
+# Example: Run rBergomi experiments in parallel on 4 GPUs
+cd /Users/fredxu/Desktop/Github/function_fm_OT/scripts
+
+# GPU 0: Signature exact methods
+CUDA_VISIBLE_DEVICES=0 nohup python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_exact_leadlag --seed 1 &> log_rbergomi_exact1.txt &
+
+# GPU 1: High order signature
+CUDA_VISIBLE_DEVICES=1 nohup python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_leadlag_order4 --seed 1 &> log_rbergomi_order4.txt &
+
+# GPU 2: Small sigma signature
+CUDA_VISIBLE_DEVICES=2 nohup python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_sig_sigma0.05 --seed 1 &> log_rbergomi_sigma005.txt &
+
+# GPU 3: Euclidean exact
+CUDA_VISIBLE_DEVICES=3 nohup python rBergomi_ot.py --config-file ../configs/phase3_improvement_sweep.yaml --config rbergomi_euclidean_exact_gp0.1 --seed 1 &> log_rbergomi_euc.txt &
+
+wait
+

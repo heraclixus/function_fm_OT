@@ -194,14 +194,36 @@ def get_best_config_per_category(configs, categories: Dict = KERNEL_CATEGORIES) 
     Find the best performing configuration for each kernel category.
     Best is determined by lowest average MSE across all metrics.
     
+    Also includes sweep configs (sig_*, rbf_*, euclidean_*) in their respective categories.
+    
     Returns dict mapping category name -> best config data
     """
     # Normalize configs to dict format
     configs = normalize_configs(configs)
     
+    # Extend categories to include sweep configs
+    extended_categories = {cat: list(names) for cat, names in categories.items()}
+    
+    # Map sweep prefixes to categories
+    prefix_to_category = {
+        'sig_': 'Signature',
+        'signature_': 'Signature',
+        'rbf_': 'RBF',
+        'euclidean_': 'Euclidean',
+        'gaussian_': 'Gaussian',
+    }
+    
+    # Add sweep configs to appropriate categories
+    for config_name in configs.keys():
+        for prefix, category in prefix_to_category.items():
+            if config_name.startswith(prefix) and category in extended_categories:
+                if config_name not in extended_categories[category]:
+                    extended_categories[category].append(config_name)
+                break
+    
     best_per_category = {}
     
-    for category_name, config_names in categories.items():
+    for category_name, config_names in extended_categories.items():
         best_config = None
         best_avg_mse = float('inf')
         
@@ -219,8 +241,9 @@ def get_best_config_per_category(configs, categories: Dict = KERNEL_CATEGORIES) 
                 # Compute average MSE across the metrics we care about
                 mse_values = []
                 for metric in METRICS:
-                    if metric in metrics and metrics[metric] is not None:
-                        mse_values.append(metrics[metric])
+                    val = metrics.get(metric)
+                    if val is not None and isinstance(val, (int, float)):
+                        mse_values.append(val)
                 
                 if mse_values:
                     avg_mse = np.mean(mse_values)
@@ -501,35 +524,48 @@ def process_dataset(dataset_key: str, outputs_dir: Path, plots_output_dir: Path,
         print(f"  Warning: Directory not found: {dataset_dir}")
         return False
     
-    # Load experiment summary - try files in order from summary_files list
-    summary = None
-    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+    # First, try to load aggregated results (includes sweep experiments)
+    aggregated = load_aggregated_results(dataset_dir, dataset_key)
     
-    for summary_file in summary_files:
-        summary_path = dataset_dir / summary_file
-        if summary_path.exists():
-            with open(summary_path, 'r') as f:
-                summary = json.load(f)
-            print(f"  Using: {summary_file}")
-            break
-    
-    if summary is None:
-        print(f"  Warning: No experiment summary found in {dataset_dir}")
-        return False
-    
-    # Get configs dict - check for nested config key (e.g., econ1_population)
-    config_key = dataset_info.get('config_key', None)
-    if config_key:
-        if config_key in summary:
-            configs = summary[config_key]
-        else:
-            print(f"  Warning: Config key '{config_key}' not found in summary")
-            return False
-    elif 'configs' in summary:
-        configs = summary['configs']
+    if aggregated and 'configs' in aggregated:
+        print(f"  Using: aggregated_results (includes sweep experiments)")
+        # Extract configs from aggregated format
+        configs = {}
+        for config_name, config_data in aggregated['configs'].items():
+            if 'metrics' in config_data:
+                configs[config_name] = config_data['metrics']
+            else:
+                configs[config_name] = config_data
     else:
-        print(f"  Warning: No 'configs' key found in summary")
-        return False
+        # Fallback: Load experiment summary - try files in order from summary_files list
+        summary = None
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                print(f"  Using: {summary_file}")
+                break
+        
+        if summary is None:
+            print(f"  Warning: No experiment summary found in {dataset_dir}")
+            return False
+        
+        # Get configs dict - check for nested config key (e.g., econ1_population)
+        config_key = dataset_info.get('config_key', None)
+        if config_key:
+            if config_key in summary:
+                configs = summary[config_key]
+            else:
+                print(f"  Warning: Config key '{config_key}' not found in summary")
+                return False
+        elif 'configs' in summary:
+            configs = summary['configs']
+        else:
+            print(f"  Warning: No 'configs' key found in summary")
+            return False
     
     # Find best config per category (with optional Gaussian filtering)
     categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
@@ -892,12 +928,59 @@ def load_baseline_from_subdirs(dataset_dir: Path, model_name: str, seeds: List[i
     return avg_metrics if avg_metrics else None
 
 
+def load_aggregated_results(dataset_dir: Path, dataset_key: str) -> Optional[Dict]:
+    """
+    Load aggregated results file if it exists.
+    
+    Aggregated results combine original experiments + sweep experiments and
+    contain the best configuration for each metric.
+    """
+    # Handle special cases where dataset_key differs from file naming
+    key_mappings = {
+        'econ1': 'econ1_population',
+        'econ2': 'econ2_population', 
+        'econ3': 'econ3_population',
+    }
+    file_key = key_mappings.get(dataset_key, dataset_key)
+    
+    # Try different naming patterns for aggregated results
+    possible_names = [
+        f'aggregated_results_{file_key}.json',
+        f'aggregated_results_{dataset_key}.json',
+        'aggregated_results.json',
+    ]
+    
+    for name in possible_names:
+        agg_file = dataset_dir / name
+        if agg_file.exists():
+            try:
+                with open(agg_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    # Also check parent directory for nested datasets (e.g., econ_ot_comprehensive/econ1_population)
+    parent_dir = dataset_dir.parent
+    for name in possible_names:
+        agg_file = parent_dir / name
+        if agg_file.exists():
+            try:
+                with open(agg_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    return None
+
+
 def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Dict]:
     """Get metrics for baseline models (DDPM, NCSN, FFM, k-FFM) for a dataset.
     
     For k-FFM, we select the BEST value for each metric across all kernel variants,
     not just one globally-selected configuration. This ensures that k-FFM represents
     the best achievable performance for each metric.
+    
+    Priority: aggregated_results > comprehensive_metrics > experiment_summary
     """
     dataset_info = DATASETS.get(dataset_key)
     if not dataset_info:
@@ -907,31 +990,48 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     if not dataset_dir.exists():
         return None
     
-    # Load experiment summary
-    summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
-    summary = None
-    for summary_file in summary_files:
-        summary_path = dataset_dir / summary_file
-        if summary_path.exists():
-            with open(summary_path, 'r') as f:
-                summary = json.load(f)
-            break
+    # First, try to load aggregated results (includes sweep experiments)
+    aggregated = load_aggregated_results(dataset_dir, dataset_key)
     
-    if not summary:
-        return None
-    
-    # Get configs
-    config_key = dataset_info.get('config_key', None)
-    if config_key:
-        if config_key not in summary:
-            return None
-        configs = summary[config_key]
-    elif 'configs' in summary:
-        configs = summary['configs']
+    if aggregated and 'configs' in aggregated:
+        # Use aggregated results - they already combine original + sweep experiments
+        configs = aggregated['configs']
+        
+        # Extract metrics from aggregated format (metrics are nested under 'metrics' key)
+        normalized_configs = {}
+        for config_name, config_data in configs.items():
+            if 'metrics' in config_data:
+                normalized_configs[config_name] = config_data['metrics']
+            else:
+                normalized_configs[config_name] = config_data
+        
+        configs = normalized_configs
     else:
-        return None
-    
-    configs = normalize_configs(configs)
+        # Fallback: Load from experiment summary
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        summary = None
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                break
+        
+        if not summary:
+            return None
+        
+        # Get configs
+        config_key = dataset_info.get('config_key', None)
+        if config_key:
+            if config_key not in summary:
+                return None
+            configs = summary[config_key]
+        elif 'configs' in summary:
+            configs = summary['configs']
+        else:
+            return None
+        
+        configs = normalize_configs(configs)
     
     result = {}
     
@@ -959,11 +1059,26 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     
     # Get k-FFM: for each metric, find the BEST value across all OT kernel types
     # This ensures k-FFM represents the best achievable performance per metric
+    # Include all possible OT config names (original + sweep experiments)
     ot_config_names = [
+        # Original configs
         'signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0',
         'rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0',
         'euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0',
+        'gaussian_ot', 'signature_sinkhorn_barycentric', 'rbf_sinkhorn_barycentric',
     ]
+    
+    # Also include any config that looks like an OT config (from sweeps)
+    for config_name in configs.keys():
+        if config_name not in ot_config_names and config_name not in ['DDPM', 'NCSN', 'independent']:
+            # Check if it's an OT config (has use_ot=True or ot_kernel set)
+            config_data = configs[config_name]
+            if isinstance(config_data, dict):
+                if config_data.get('use_ot') == True or config_data.get('ot_kernel'):
+                    ot_config_names.append(config_name)
+                # Also check for sweep configs (sig_*, rbf_*, euclidean_*)
+                elif config_name.startswith(('sig_', 'rbf_', 'euclidean_', 'gp_')):
+                    ot_config_names.append(config_name)
     
     # All metrics we might want to compare
     all_metrics = [
@@ -985,7 +1100,8 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
         # Build k-FFM metrics by taking the best (minimum) value for each metric
         kffm_metrics = {}
         for metric in all_metrics:
-            values = [m.get(metric) for m in ot_metrics_list if m.get(metric) is not None]
+            values = [m.get(metric) for m in ot_metrics_list 
+                     if m.get(metric) is not None and isinstance(m.get(metric), (int, float))]
             if values:
                 kffm_metrics[metric] = min(values)
         
@@ -1089,7 +1205,7 @@ def generate_baseline_comparison_plot(
                 if not np.isnan(bar.get_height()):
                     rank = ranks_per_dataset.get(dataset_key, {}).get(model)
                     if rank:
-                        ax.annotate(f'{rank}',
+                        ax.annotate(f'#{rank}',
                                    xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
                                    xytext=(0, 2), textcoords='offset points',
                                    ha='center', va='bottom', fontsize=9, fontweight='bold',
@@ -1120,7 +1236,6 @@ def generate_baseline_comparison_plot(
     axes[0].legend(handles, labels, loc='upper right', ncol=4,
                    fontsize=9, frameon=True, framealpha=0.9)
     
-    plt.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -1255,7 +1370,6 @@ def generate_baseline_stacked_plot(
              loc='upper center', bbox_to_anchor=(0.5, -0.15),
              ncol=len(BASELINE_MODELS), fontsize=10, frameon=False)
     
-    plt.title(title, fontsize=13, fontweight='bold')
     plt.tight_layout()
     
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
