@@ -1,0 +1,236 @@
+# Navier-Stokes Sweep: Focus on Spectrum MSE (Log-Scale)
+# 
+# Current Status:
+# - k-FFM (euclidean_sinkhorn_reg0.5) WINS on spectrum_mse_log: 0.770
+# - DDPM: 0.937 (21% worse than k-FFM)
+# - FFM (independent): 0.772
+#
+# Goal: Further improve k-FFM's spectrum_mse_log (currently 0.770)
+#
+# Key insight: Log-scale spectrum measures relative accuracy across ALL frequencies,
+# giving equal weight to high-frequency tail as dominant modes.
+#
+# Best performing pattern:
+# - Sinkhorn method (not exact) works better
+# - Medium regularization (0.5) is optimal
+# - Euclidean kernel slightly better than RBF
+
+# =============================================================================
+# PRIORITY 1: Regularization Fine-tuning Around Best (0.5)
+# =============================================================================
+
+# Explore around the optimal reg=0.5
+euclidean_sinkhorn_reg0.3:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.3
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_sinkhorn_reg0.4:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.4
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_sinkhorn_reg0.6:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.6
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_sinkhorn_reg0.7:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.7
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+# RBF counterparts
+rbf_sinkhorn_reg0.3:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.3
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 10.0
+
+rbf_sinkhorn_reg0.4:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.4
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 10.0
+
+# =============================================================================
+# PRIORITY 2: GP Prior Tuning (smoother priors for better spectral decay)
+# Current: kernel_length=0.001 (very rough)
+# =============================================================================
+
+gp_kl0.005_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.005
+  gp_kernel_variance: 1.0
+
+gp_kl0.01_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 1.0
+
+gp_kl0.02_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+
+gp_kl0.05_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 1.0
+
+# =============================================================================
+# PRIORITY 3: FNO Modes (better spectral resolution)
+# Current: modes=16 for 64x64 fields
+# =============================================================================
+
+modes24_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  fno_modes: 24
+
+modes32_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  fno_modes: 32
+
+modes12_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  fno_modes: 12
+
+# Independent (no OT) with different modes for comparison
+modes24_independent:
+  use_ot: false
+  fno_modes: 24
+
+modes32_independent:
+  use_ot: false
+  fno_modes: 32
+
+# =============================================================================
+# PRIORITY 4: RBF Sigma Tuning with Optimal Reg
+# =============================================================================
+
+rbf_sigma5.0_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 5.0
+
+rbf_sigma20.0_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 20.0
+
+rbf_sigma50.0_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 50.0
+
+# =============================================================================
+# PRIORITY 5: Combined Best Settings
+# =============================================================================
+
+combo_gp0.01_modes24:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 1.0
+  fno_modes: 24
+
+combo_gp0.02_modes32:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+  fno_modes: 32
+
+combo_gp0.05_modes24_reg0.4:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.4
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 1.0
+  fno_modes: 24
+
+# RBF combined
+combo_rbf_gp0.02_sigma20:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 20.0
+
+combo_rbf_gp0.01_sigma10_modes24:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 1.0
+  fno_modes: 24
+  ot_kernel_params:
+    sigma: 10.0

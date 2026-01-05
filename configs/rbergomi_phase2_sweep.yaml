@@ -1,0 +1,295 @@
+# =============================================================================
+# Phase 2: rBergomi Sweep - New Strategies
+# 
+# Phase 1 findings:
+# - gaussian_ot is best k-FFM for autocorrelation (0.00104 vs DDPM's 0.000457)
+# - Signature kernel sweep didn't significantly improve autocorrelation
+# - exact OT methods good for spectrum metrics
+# - All signature variants clustered around similar values
+#
+# Goal: Close the 2.3x gap on autocorrelation_mse with DDPM
+#
+# New strategies:
+# 1. Gaussian OT parameter tuning (since it's best k-FFM)
+# 2. Exact OT method exploration (works well for spectrum)
+# 3. GP prior tuning (affects smoothness of learned paths)
+# 4. Very low RBF sigma (for rough paths H=0.1)
+# 5. Lower Sinkhorn regularization exploration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Gaussian OT Tuning (best k-FFM for autocorrelation)
+# Try different regularization values for the Gaussian OT
+# -----------------------------------------------------------------------------
+gaussian_ot_reg1e-2:
+  use_ot: true
+  ot_method: gaussian
+  ot_reg: 0.01
+  ot_coupling: barycentric
+
+gaussian_ot_reg1e-4:
+  use_ot: true
+  ot_method: gaussian
+  ot_reg: 0.0001
+  ot_coupling: barycentric
+
+gaussian_ot_reg1e-5:
+  use_ot: true
+  ot_method: gaussian
+  ot_reg: 0.00001
+  ot_coupling: barycentric
+
+# Gaussian OT with sample coupling instead of barycentric
+gaussian_ot_sample:
+  use_ot: true
+  ot_method: gaussian
+  ot_reg: 0.001
+  ot_coupling: sample
+
+# -----------------------------------------------------------------------------
+# 2. Exact OT with Small Bandwidths (for rough paths)
+# Very small sigma to capture local rough structure
+# -----------------------------------------------------------------------------
+rbf_exact_sigma0.1:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.1
+
+rbf_exact_sigma0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_exact_sigma0.2:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.2
+
+# Euclidean exact (already good, but try with GP tuning)
+euclidean_exact_gp0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+euclidean_exact_gp0.2:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+
+# -----------------------------------------------------------------------------
+# 3. GP Prior Tuning
+# For rough paths (H=0.1), try shorter length scales
+# Current default: kernel_length=1.0, kernel_variance=1.0
+# -----------------------------------------------------------------------------
+gp_kl0.5_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 1.0
+
+gp_kl0.2_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 1.0
+
+gp_kl0.1_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.1
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 1.0
+
+gp_kl2.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 2.0
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 1.0
+
+# GP tuning with Euclidean kernel
+euclidean_gp0.5_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+euclidean_gp0.2_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+
+# -----------------------------------------------------------------------------
+# 4. Very Low Sinkhorn Regularization
+# More precise OT coupling might help for autocorrelation
+# -----------------------------------------------------------------------------
+rbf_sigma0.5_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_sigma0.5_reg0.005:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.005
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+euclidean_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_reg0.005:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.005
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+# -----------------------------------------------------------------------------
+# 5. Combined Best Strategies
+# Combine GP tuning + low sigma + low reg
+# -----------------------------------------------------------------------------
+combo_gp0.5_sigma0.5_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 0.5
+
+combo_gp0.2_sigma0.2_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 0.2
+
+combo_exact_gp0.5_sigma0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 0.5
+
+# -----------------------------------------------------------------------------
+# 6. Higher Regularization (since reg0.5-1.0 worked for Euclidean)
+# -----------------------------------------------------------------------------
+rbf_sigma0.5_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_sigma0.5_reg1.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 1.0
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+# -----------------------------------------------------------------------------
+# 7. Signature with GP Tuning (since signature was stable but not best)
+# -----------------------------------------------------------------------------
+sig_gp0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_gp0.2_sigma0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.1
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+

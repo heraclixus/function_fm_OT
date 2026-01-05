@@ -1,0 +1,193 @@
+# Stochastic KdV Sweep: Focus on Mean MSE
+# Goal: Close the gap between k-FFM (0.00136) and FFM (0.000934) on mean_mse
+# While maintaining good spectrum_mse performance
+#
+# Key insights from previous experiments:
+# - Lower sinkhorn reg helps mean_mse
+# - Small RBF sigma (0.5) + low reg is current best k-FFM for mean
+# - Signature with no time_aug is best for spectrum
+# - Euclidean with reg0.1 is close to FFM on mean
+
+# =============================================================================
+# PRIORITY 1: Very Low Sinkhorn Regularization
+# Hypothesis: Near-exact OT coupling may preserve mean structure better
+# =============================================================================
+
+euclidean_reg0.005:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.005
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_reg0.001:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.001
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+rbf_sigma0.5_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_sigma0.5_reg0.005:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.005
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+# =============================================================================
+# PRIORITY 2: Even Smaller RBF Sigma
+# Hypothesis: Smaller sigma = more local matching = better mean preservation
+# =============================================================================
+
+rbf_sigma0.1_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.1
+
+rbf_sigma0.2_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.2
+
+rbf_sigma0.3_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.3
+
+rbf_sigma0.1_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.1
+
+# =============================================================================
+# PRIORITY 3: GP Prior Tuning
+# Current: kernel_length=0.01, kernel_variance=0.1
+# Hypothesis: Smoother GP prior may help mean estimation
+# =============================================================================
+
+gp_kl0.02:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 0.1
+
+gp_kl0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 0.1
+
+gp_kl0.005_kv0.2:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.005
+  gp_kernel_variance: 0.2
+
+# GP prior + best RBF config combination
+rbf_sigma0.5_gp_kl0.02:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 0.1
+
+# =============================================================================
+# PRIORITY 4: Signature with Better Hyperparameters for Mean
+# Current best for spectrum, but signature_sinkhorn_reg0.1 has mean_mse=0.009
+# Try: lower reg + smaller static kernel sigma
+# =============================================================================
+
+sig_reg0.05_sigma0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_reg0.01_order2:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# =============================================================================
+# PRIORITY 5: Exact OT with Different Kernels
+# Hypothesis: Exact OT (no regularization) preserves structure better
+# Warning: More expensive computationally
+# =============================================================================
+
+rbf_sigma0.5_exact:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_sigma0.2_exact:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.2
+

@@ -1,0 +1,335 @@
+# =============================================================================
+# Phase 2: econ1 Autocorrelation Focus
+# 
+# Phase 1 findings:
+# - DDPM: autocorrelation_mse = 8.72e-07 (BEST)
+# - Best k-FFM: signature_sinkhorn_reg0.5 = 0.000155 (178x WORSE!)
+# - All signature variants cluster around 0.00015-0.00019
+# - Lead-lag, dyadic order, sigma sweeps didn't help
+# - Higher reg (0.5, 1.0) slightly better than lower (0.1)
+# - Gaussian OT and barycentric coupling are catastrophic
+#
+# Goal: Close the 178x gap on autocorrelation_mse
+#
+# NEW STRATEGIES:
+# 1. Very high Sinkhorn regularization (since higher is better)
+# 2. GP prior tuning (affects temporal correlation structure)
+# 3. Exact OT methods (euclidean_exact was 0.000201)
+# 4. Very small RBF bandwidth (local coupling for temporal structure)
+# 5. Combined best approaches
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Very High Sinkhorn Regularization
+# Since reg 0.5-1.0 was better than 0.1, try even higher
+# -----------------------------------------------------------------------------
+euclidean_reg2.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 2.0
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_reg5.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 5.0
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+euclidean_reg10.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 10.0
+  ot_kernel: euclidean
+  ot_coupling: sample
+
+rbf_sigma1.0_reg2.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 2.0
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 1.0
+
+rbf_sigma1.0_reg5.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 5.0
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 1.0
+
+sig_reg2.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 2.0
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+sig_reg5.0:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 5.0
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# 2. GP Prior Tuning
+# Autocorrelation is about temporal structure - GP prior matters!
+# Current: kernel_length=1.0 (?) - try different values
+# -----------------------------------------------------------------------------
+gp_kl0.5_euclidean:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+gp_kl0.2_euclidean:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+
+gp_kl0.1_euclidean:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.1
+  gp_kernel_variance: 1.0
+
+gp_kl2.0_euclidean:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 2.0
+  gp_kernel_variance: 1.0
+
+gp_kl5.0_euclidean:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 5.0
+  gp_kernel_variance: 1.0
+
+# GP tuning for signature
+gp_kl0.5_sig:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: signature
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+gp_kl0.2_sig:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: signature
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# 3. Exact OT Methods (no Sinkhorn approximation)
+# euclidean_exact was 0.000201 - try exact with different kernels
+# -----------------------------------------------------------------------------
+rbf_exact_sigma0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.5
+
+rbf_exact_sigma0.1:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.1
+
+rbf_exact_sigma2.0:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 2.0
+
+# Exact with GP tuning
+euclidean_exact_gp0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+euclidean_exact_gp0.2:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+
+# -----------------------------------------------------------------------------
+# 4. Very Small RBF Bandwidth (local temporal coupling)
+# For autocorrelation, maybe we need very local coupling
+# -----------------------------------------------------------------------------
+rbf_sigma0.1_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.1
+
+rbf_sigma0.2_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.2
+
+rbf_sigma0.05_reg0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.5
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 0.05
+
+# -----------------------------------------------------------------------------
+# 5. Combined Best Strategies
+# High reg + GP tuning + small bandwidth
+# -----------------------------------------------------------------------------
+combo_reg2_gp0.5:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 2.0
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+combo_reg2_gp0.2_rbf:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 2.0
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 0.5
+
+combo_exact_gp0.2_rbf0.5:
+  use_ot: true
+  ot_method: exact
+  ot_kernel: rbf
+  ot_coupling: sample
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    sigma: 0.5
+
+combo_reg5_gp0.5_sig:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 5.0
+  ot_kernel: signature
+  ot_coupling: sample
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 0.5
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+
+# -----------------------------------------------------------------------------
+# 6. Independent with GP Tuning (baseline comparison)
+# See if GP prior alone can help autocorrelation
+# -----------------------------------------------------------------------------
+independent_gp0.5:
+  use_ot: false
+  gp_kernel_length: 0.5
+  gp_kernel_variance: 1.0
+
+independent_gp0.2:
+  use_ot: false
+  gp_kernel_length: 0.2
+  gp_kernel_variance: 1.0
+
+independent_gp2.0:
+  use_ot: false
+  gp_kernel_length: 2.0
+  gp_kernel_variance: 1.0
+

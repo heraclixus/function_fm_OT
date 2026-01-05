@@ -1,0 +1,278 @@
+# KdV Spectrum (Log-Scale) Focused Sweep Configurations
+# 
+# Goal: Improve spectrum_mse_log to beat DDPM (10.46)
+# Current best k-FFM: euclidean_sinkhorn_reg0.1 with spectrum_mse_log = 15.97
+#
+# Key insight: spectrum_mse_log measures relative accuracy across ALL frequencies,
+# including the high-frequency tail. DDPM's diffusion process naturally captures
+# the spectral decay well. We need to tune k-FFM to match this.
+#
+# Strategies:
+# 1. GP prior tuning - match spectral decay to data
+# 2. FNO modes - balance spectral resolution vs artifacts
+# 3. Lower regularization - more accurate OT coupling
+# 4. RBF bandwidth - control spectral influence in coupling
+
+# =============================================================================
+# 1. GP Prior - Spectral Decay Matching
+#    The prior's spectral characteristics directly affect generated samples.
+#    Current: kernel_length=0.01 (quite rough)
+#    Smoother priors → steeper spectral decay (like physical PDE solutions)
+# =============================================================================
+# Smoother priors (longer length scales)
+gp_kl0.02_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.02
+  gp_kernel_variance: 0.1
+
+gp_kl0.05_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 0.1
+
+gp_kl0.1_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.1
+  gp_kernel_variance: 0.1
+
+# Rougher priors (shorter length scales) - might capture more high-freq content
+gp_kl0.005_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.005
+  gp_kernel_variance: 0.1
+
+gp_kl0.002_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.002
+  gp_kernel_variance: 0.1
+
+# =============================================================================
+# 2. FNO Modes - Spectral Resolution vs Artifacts
+#    More modes = better high-freq resolution but potential overfitting
+#    Fewer modes = smoother but might miss spectral details
+#    Default is 64; KdV has 512 spatial points
+# =============================================================================
+fno_modes32_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+  fno_modes: 32
+
+fno_modes48_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+  fno_modes: 48
+
+fno_modes96_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+  fno_modes: 96
+
+fno_modes128_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+  fno_modes: 128
+
+# =============================================================================
+# 3. Lower Sinkhorn Regularization
+#    Lower reg = more accurate OT coupling, but slower
+#    Might preserve spectral structure better
+# =============================================================================
+euclidean_reg0.05:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+euclidean_reg0.02:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.02
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+euclidean_reg0.01:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.01
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+# =============================================================================
+# 4. RBF Kernel with Spectral-Focused Sigma
+#    Smaller sigma = more local coupling (might preserve high-freq)
+#    Larger sigma = smoother coupling (might match spectral decay)
+# =============================================================================
+rbf_sigma1.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 1.0
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+rbf_sigma5.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 5.0
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+rbf_sigma50.0_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: rbf
+  ot_coupling: sample
+  ot_kernel_params:
+    sigma: 50.0
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+# =============================================================================
+# 5. Combined Best Strategies
+#    Combine smoother GP prior + optimal FNO modes + low reg
+# =============================================================================
+combo_smooth_gp_modes48:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 0.1
+  fno_modes: 48
+
+combo_smooth_gp_modes96:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 0.1
+  fno_modes: 96
+
+combo_rough_gp_modes128:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.05
+  ot_kernel: euclidean
+  ot_coupling: sample
+  gp_kernel_length: 0.002
+  gp_kernel_variance: 0.1
+  fno_modes: 128
+
+# =============================================================================
+# 6. Signature Kernel (captures path structure for spectral patterns)
+# =============================================================================
+sig_order2_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+sig_leadlag_order2_reg0.1:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: true
+    dyadic_order: 2
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+  gp_kernel_length: 0.01
+  gp_kernel_variance: 0.1
+
+# Signature with smoother GP prior
+sig_smooth_gp:
+  use_ot: true
+  ot_method: sinkhorn
+  ot_reg: 0.1
+  ot_kernel: signature
+  ot_coupling: sample
+  ot_kernel_params:
+    time_aug: true
+    lead_lag: false
+    dyadic_order: 1
+    static_kernel_type: rbf
+    static_kernel_sigma: 1.0
+    add_basepoint: true
+    normalize: true
+    max_seq_len: 64
+    max_batch: 32
+  gp_kernel_length: 0.05
+  gp_kernel_variance: 0.1
