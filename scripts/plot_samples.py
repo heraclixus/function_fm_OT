@@ -306,9 +306,11 @@ def plot_1d_samples_multi(ax, samples: torch.Tensor, title: str, color: str = 'b
     mean_traj = np.mean(samples, axis=0)
     ax.plot(x, mean_traj, color=color, linewidth=2, alpha=0.9, label='Mean')
     
-    ax.set_title(f'{title} (n={n_plot})', fontsize=12, fontweight='bold')
-    ax.set_xlabel('t', fontsize=10)
-    ax.set_ylabel('Value', fontsize=10)
+    # Large font sizes for half-page width display in papers
+    ax.set_title(f'{title} (n={n_plot})', fontsize=18, fontweight='bold')
+    ax.set_xlabel('t', fontsize=14)
+    ax.set_ylabel('Value', fontsize=14)
+    ax.tick_params(axis='both', labelsize=12)
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -599,7 +601,8 @@ def create_multi_sample_comparison_figure(
                              color=colors.get(method_name, 'blue'),
                              n_samples=n_samples, alpha=0.05)
     
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    # No main title (suptitle) - only subplot titles for paper figures
+    plt.tight_layout()
     
     # Save
     if output_path is None:
