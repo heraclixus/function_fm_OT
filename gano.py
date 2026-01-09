@@ -21,11 +21,30 @@ class GANO:
         """Calculates the gradient penalty loss for GANO"""
         # Random weight term for interpolation between real and fake data
         batch_size = x.shape[0]
+        
+        # Ensure x and x_syn have compatible shapes (squeeze extra dimensions)
+        while x.ndim > 3 and x.shape[-1] == 1:
+            x = x.squeeze(-1)
+        while x_syn.ndim > 3 and x_syn.shape[-1] == 1:
+            x_syn = x_syn.squeeze(-1)
+        
+        # Handle case where x_syn might have different ndim than x
+        if x_syn.ndim != x.ndim:
+            # Try to make them compatible
+            if x_syn.ndim > x.ndim:
+                while x_syn.ndim > x.ndim:
+                    x_syn = x_syn.squeeze(1) if x_syn.shape[1] == 1 else x_syn.squeeze(-1)
+            else:
+                while x.ndim > x_syn.ndim:
+                    x = x.squeeze(1) if x.shape[1] == 1 else x.squeeze(-1)
+        
         dims = x.shape[1:-1]
         prod_dims = dims.numel()
 
-
-        alpha = torch.randn(batch_size, 1, 1, 1, device=self.device)
+        # Create alpha with the right number of dimensions to broadcast
+        # x has shape (batch, *dims, channels), so we need (batch, 1, 1, ..., 1)
+        alpha_shape = [batch_size] + [1] * (x.ndim - 1)
+        alpha = torch.randn(*alpha_shape, device=self.device)
         interpolates = (alpha * x + ((1 - alpha) * x_syn)).requires_grad_(True)
         
         model = self.D

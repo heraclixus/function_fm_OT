@@ -700,6 +700,446 @@ def generate_single_plot(
         print(f"✗ Failed to generate plot for {dataset_key}")
 
 
+# =============================================================================
+# Training Loss Curve Plots
+# =============================================================================
+
+# Colors for kernel categories in loss curve plots
+KERNEL_CURVE_COLORS = {
+    'Independent': '#1f77b4',   # Blue
+    'Signature': '#2ca02c',     # Green
+    'RBF': '#ff7f0e',           # Orange
+    'Euclidean': '#d62728',     # Red
+}
+
+
+def load_training_losses(config_dir: Path, seeds: List[int] = [1, 2, 4]) -> Optional[List[float]]:
+    """
+    Load training losses from a config directory.
+    Returns averaged losses across available seeds.
+    """
+    all_losses = []
+    max_len = 0
+    
+    for seed in seeds:
+        seed_dir = config_dir / f'seed_{seed}'
+        training_file = seed_dir / 'training_metrics.json'
+        
+        if training_file.exists():
+            try:
+                with open(training_file, 'r') as f:
+                    training_data = json.load(f)
+                
+                train_losses = training_data.get('train_losses', [])
+                if train_losses:
+                    all_losses.append(train_losses)
+                    max_len = max(max_len, len(train_losses))
+            except (json.JSONDecodeError, IOError):
+                continue
+    
+    if not all_losses:
+        return None
+    
+    # Pad shorter sequences and average
+    padded = []
+    for losses in all_losses:
+        if len(losses) < max_len:
+            # Pad with last value
+            losses = losses + [losses[-1]] * (max_len - len(losses))
+        padded.append(losses)
+    
+    # Return averaged losses
+    avg_losses = np.mean(padded, axis=0).tolist()
+    return avg_losses
+
+
+def find_best_config_with_losses(
+    dataset_dir: Path,
+    category: str,
+    config_names: List[str],
+    configs: Dict,
+    seeds: List[int] = [1, 2, 4]
+) -> Tuple[Optional[str], Optional[List[float]], Optional[float]]:
+    """
+    Find the best config in a category that has training loss data.
+    Returns (config_name, losses, convergence_rate).
+    """
+    best_config = None
+    best_losses = None
+    best_conv_rate = None
+    
+    # Extended config names including sweep configs
+    extended_names = list(config_names)
+    
+    # Add sweep configs based on category
+    prefix_map = {
+        'Signature': ['sig_', 'signature_'],
+        'RBF': ['rbf_'],
+        'Euclidean': ['euclidean_'],
+    }
+    
+    if category in prefix_map:
+        for config_name in configs.keys():
+            for prefix in prefix_map[category]:
+                if config_name.startswith(prefix) and config_name not in extended_names:
+                    # Skip gaussian configs
+                    if 'gaussian' in config_name.lower():
+                        continue
+                    extended_names.append(config_name)
+    
+    for config_name in extended_names:
+        config_subdir = dataset_dir / config_name
+        
+        if not config_subdir.exists():
+            continue
+        
+        # Load training losses
+        losses = load_training_losses(config_subdir, seeds)
+        if losses is None:
+            continue
+        
+        # Compute convergence rate
+        conv_rate = compute_convergence_rate(losses)
+        if conv_rate is None:
+            continue
+        
+        # Select best by convergence rate (higher is better)
+        if best_conv_rate is None or conv_rate > best_conv_rate:
+            best_conv_rate = conv_rate
+            best_losses = losses
+            best_config = config_name
+    
+    return best_config, best_losses, best_conv_rate
+
+
+def plot_loss_curves(
+    dataset_key: str,
+    outputs_dir: Path,
+    plots_output_dir: Path,
+    ignore_gaussian: bool = True,
+    figsize: Tuple[float, float] = (10, 6)
+) -> bool:
+    """
+    Plot training loss curves for the best config of each kernel category.
+    
+    Args:
+        dataset_key: Dataset identifier
+        outputs_dir: Base outputs directory
+        plots_output_dir: Directory to save plots
+        ignore_gaussian: If True, exclude Gaussian category
+        figsize: Figure size
+    
+    Returns:
+        True if plot was generated successfully
+    """
+    dataset_info = DATASETS.get(dataset_key)
+    if not dataset_info:
+        print(f"  Unknown dataset: {dataset_key}")
+        return False
+    
+    dataset_dir = outputs_dir / dataset_info['dir']
+    if not dataset_dir.exists():
+        print(f"  Directory not found: {dataset_dir}")
+        return False
+    
+    # Load configs
+    aggregated = load_aggregated_results(dataset_dir, dataset_key)
+    if aggregated and 'configs' in aggregated:
+        configs = {}
+        for config_name, config_data in aggregated['configs'].items():
+            if 'metrics' in config_data:
+                configs[config_name] = config_data['metrics']
+            else:
+                configs[config_name] = config_data
+    else:
+        # Fallback to summary files
+        summary = None
+        summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+        for summary_file in summary_files:
+            summary_path = dataset_dir / summary_file
+            if summary_path.exists():
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                break
+        
+        if not summary:
+            print(f"  No summary file found for {dataset_key}")
+            return False
+        
+        if 'configs' in summary:
+            configs = normalize_configs(summary['configs'])
+        else:
+            print(f"  No configs found in summary for {dataset_key}")
+            return False
+    
+    # Get kernel categories
+    categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
+    
+    # Find best config with losses for each category
+    category_data = {}  # {category: (config_name, losses, conv_rate)}
+    
+    for category, config_names in categories.items():
+        config_name, losses, conv_rate = find_best_config_with_losses(
+            dataset_dir, category, config_names, configs
+        )
+        if losses is not None:
+            category_data[category] = (config_name, losses, conv_rate)
+            print(f"    {category}: {config_name} (conv_rate={conv_rate:.4f})")
+    
+    if not category_data:
+        print(f"  No training loss data found for {dataset_key}")
+        return False
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    for category, (config_name, losses, conv_rate) in category_data.items():
+        color = KERNEL_CURVE_COLORS.get(category, '#333333')
+        epochs = np.arange(len(losses))
+        
+        # Plot with label showing config name
+        label = f"{category}"
+        ax.plot(epochs, losses, color=color, linewidth=2, label=label, alpha=0.9)
+    
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel('Loss (log scale)', fontsize=12)
+    ax.set_title(f'Training Loss Curves - {dataset_info["title"]}', fontsize=14, fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Legend
+    ax.legend(loc='upper right', fontsize=10, framealpha=0.95)
+    
+    plt.tight_layout()
+    
+    # Save
+    output_path = plots_output_dir / f"{dataset_key}_loss_curves.png"
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"  Saved: {output_path}")
+    return True
+
+
+def generate_loss_curve_plots(
+    outputs_dir: Path = None,
+    plots_output_dir: Path = None,
+    ignore_gaussian: bool = True,
+    dataset_key: str = None
+):
+    """
+    Generate training loss curve plots for datasets.
+    
+    Args:
+        outputs_dir: Base outputs directory
+        plots_output_dir: Directory to save plots
+        ignore_gaussian: If True, exclude Gaussian category
+        dataset_key: If specified, only generate for this dataset
+    """
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    print("=" * 60)
+    print("Generating Training Loss Curve Plots")
+    if ignore_gaussian:
+        print("(Excluding Gaussian OT)")
+    print("=" * 60)
+    
+    datasets_to_process = [dataset_key] if dataset_key else list(DATASETS.keys())
+    
+    for ds_key in datasets_to_process:
+        if ds_key not in DATASETS:
+            print(f"\nSkipping unknown dataset: {ds_key}")
+            continue
+        
+        print(f"\nProcessing {ds_key}...")
+        success = plot_loss_curves(ds_key, outputs_dir, plots_output_dir, ignore_gaussian)
+        if success:
+            print(f"  ✓ Generated loss curve plot for {ds_key}")
+        else:
+            print(f"  ✗ Failed to generate loss curve plot for {ds_key}")
+    
+    print("\n" + "=" * 60)
+    print("Done!")
+    print("=" * 60)
+
+
+def generate_combined_loss_curves_plot(
+    outputs_dir: Path = None,
+    plots_output_dir: Path = None,
+    ignore_gaussian: bool = True,
+    dpi: int = 300
+):
+    """
+    Generate a combined 5x2 plot with loss curves for all datasets (excluding moGP).
+    High resolution for full-page figures.
+    
+    Args:
+        outputs_dir: Base outputs directory
+        plots_output_dir: Directory to save plots
+        ignore_gaussian: If True, exclude Gaussian category
+        dpi: DPI for output (default 300 for high resolution)
+    """
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if plots_output_dir is None:
+        plots_output_dir = outputs_dir
+    
+    print("=" * 60)
+    print("Generating Combined Loss Curves Plot (5x2)")
+    if ignore_gaussian:
+        print("(Excluding Gaussian OT)")
+    print("=" * 60)
+    
+    # Datasets to include (exclude moGP)
+    # Order: sequence datasets first row, then PDE datasets
+    datasets_order = [
+        # Row 1-2: Sequence datasets
+        'AEMET', 'expr_genes',
+        'econ1', 'Heston',
+        'rBergomi', 'kdv',
+        # Row 3-5: PDE datasets
+        'navier_stokes', 'stochastic_kdv',
+        'stochastic_ns', 'ginzburg_landau',
+    ]
+    
+    # Get kernel categories
+    categories = get_kernel_categories(ignore_gaussian=ignore_gaussian)
+    
+    # Collect data for all datasets
+    all_data = {}  # {dataset_key: {category: (config_name, losses, conv_rate)}}
+    
+    for ds_key in datasets_order:
+        if ds_key not in DATASETS:
+            print(f"  Skipping unknown dataset: {ds_key}")
+            continue
+        
+        dataset_info = DATASETS[ds_key]
+        dataset_dir = outputs_dir / dataset_info['dir']
+        
+        if not dataset_dir.exists():
+            print(f"  Directory not found for {ds_key}: {dataset_dir}")
+            continue
+        
+        # Load configs
+        aggregated = load_aggregated_results(dataset_dir, ds_key)
+        if aggregated and 'configs' in aggregated:
+            configs = {}
+            for config_name, config_data in aggregated['configs'].items():
+                if 'metrics' in config_data:
+                    configs[config_name] = config_data['metrics']
+                else:
+                    configs[config_name] = config_data
+        else:
+            # Fallback to summary files
+            summary = None
+            summary_files = dataset_info.get('summary_files', ['comprehensive_metrics.json', 'experiment_summary.json'])
+            for summary_file in summary_files:
+                summary_path = dataset_dir / summary_file
+                if summary_path.exists():
+                    with open(summary_path, 'r') as f:
+                        summary = json.load(f)
+                    break
+            
+            if not summary or 'configs' not in summary:
+                print(f"  No configs found for {ds_key}")
+                continue
+            
+            configs = normalize_configs(summary['configs'])
+        
+        # Find best config with losses for each category
+        category_data = {}
+        for category, config_names in categories.items():
+            config_name, losses, conv_rate = find_best_config_with_losses(
+                dataset_dir, category, config_names, configs
+            )
+            if losses is not None:
+                category_data[category] = (config_name, losses, conv_rate)
+        
+        if category_data:
+            all_data[ds_key] = category_data
+            print(f"  ✓ {ds_key}: {len(category_data)} kernel categories with data")
+        else:
+            print(f"  ✗ {ds_key}: No loss data found")
+    
+    if not all_data:
+        print("\nNo data found for any dataset!")
+        return
+    
+    # Create 5x2 figure (high resolution)
+    fig, axes = plt.subplots(5, 2, figsize=(14, 18))
+    axes = axes.flatten()
+    
+    # Plot each dataset
+    plot_idx = 0
+    for ds_key in datasets_order:
+        if ds_key not in all_data:
+            # Leave subplot empty but hide it
+            if plot_idx < len(axes):
+                axes[plot_idx].set_visible(False)
+            plot_idx += 1
+            continue
+        
+        if plot_idx >= len(axes):
+            break
+        
+        ax = axes[plot_idx]
+        category_data = all_data[ds_key]
+        dataset_title = DATASETS[ds_key]['title']
+        
+        for category, (config_name, losses, conv_rate) in category_data.items():
+            color = KERNEL_CURVE_COLORS.get(category, '#333333')
+            epochs = np.arange(len(losses))
+            ax.plot(epochs, losses, color=color, linewidth=1.5, label=category, alpha=0.9)
+        
+        ax.set_xlabel('Epoch', fontsize=10)
+        ax.set_ylabel('Loss', fontsize=10)
+        ax.set_title(dataset_title, fontsize=12, fontweight='bold')
+        ax.set_yscale('log')
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(labelsize=9)
+        
+        # Only add legend to first subplot
+        if plot_idx == 0:
+            ax.legend(loc='upper right', fontsize=8, framealpha=0.95)
+        
+        plot_idx += 1
+    
+    # Hide any unused subplots
+    for idx in range(plot_idx, len(axes)):
+        axes[idx].set_visible(False)
+    
+    # Add a shared legend at the bottom
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=11, 
+               bbox_to_anchor=(0.5, 0.01), frameon=True, framealpha=0.95)
+    
+    plt.tight_layout(rect=[0, 0.04, 1, 1])  # Leave room for legend at bottom
+    
+    # Save with high resolution
+    output_path = plots_output_dir / 'all_loss_curves_combined.png'
+    plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path.with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"\n✓ Saved: {output_path} (dpi={dpi})")
+    print(f"✓ Saved: {output_path.with_suffix('.pdf')}")
+    print("\n" + "=" * 60)
+    print("Done!")
+    print("=" * 60)
+
+
 def generate_combined_plot(outputs_dir: Path = None, plots_output_dir: Path = None, ignore_gaussian: bool = True):
     """Generate a single figure with all datasets as subplots."""
     if outputs_dir is None:
@@ -1060,20 +1500,29 @@ def get_baseline_models_data(dataset_key: str, outputs_dir: Path) -> Optional[Di
     # Get k-FFM: for each metric, find the BEST value across all OT kernel types
     # This ensures k-FFM represents the best achievable performance per metric
     # Include all possible OT config names (original + sweep experiments)
+    # NOTE: gaussian_ot is EXCLUDED - focusing on kernel-based OT methods
     ot_config_names = [
-        # Original configs
+        # Original configs (excluding gaussian_ot)
         'signature_sinkhorn_reg0.1', 'signature_sinkhorn_reg0.5', 'signature_sinkhorn_reg1.0',
         'rbf_exact', 'rbf_sinkhorn_reg0.1', 'rbf_sinkhorn_reg0.5', 'rbf_sinkhorn_reg1.0',
         'euclidean_exact', 'euclidean_sinkhorn_reg0.1', 'euclidean_sinkhorn_reg0.5', 'euclidean_sinkhorn_reg1.0',
-        'gaussian_ot', 'signature_sinkhorn_barycentric', 'rbf_sinkhorn_barycentric',
+        'signature_sinkhorn_barycentric', 'rbf_sinkhorn_barycentric',
     ]
     
     # Also include any config that looks like an OT config (from sweeps)
+    # Exclude gaussian configs
     for config_name in configs.keys():
-        if config_name not in ot_config_names and config_name not in ['DDPM', 'NCSN', 'independent']:
+        if config_name not in ot_config_names and config_name not in ['DDPM', 'NCSN', 'independent', 'gaussian_ot']:
+            # Skip gaussian configs
+            if config_name.startswith('gaussian'):
+                continue
             # Check if it's an OT config (has use_ot=True or ot_kernel set)
             config_data = configs[config_name]
             if isinstance(config_data, dict):
+                # Also check ot_method is not gaussian
+                ot_method = config_data.get('ot_method', '')
+                if ot_method == 'gaussian':
+                    continue
                 if config_data.get('use_ot') == True or config_data.get('ot_kernel'):
                     ot_config_names.append(config_name)
                 # Also check for sweep configs (sig_*, rbf_*, euclidean_*)
@@ -1466,6 +1915,22 @@ if __name__ == '__main__':
         action='store_true',
         help='Generate baseline comparison plots (DDPM, NCSN, FFM, k-FFM)'
     )
+    parser.add_argument(
+        '--loss-curves',
+        action='store_true',
+        help='Generate training loss curve plots (best config per kernel category)'
+    )
+    parser.add_argument(
+        '--loss-curves-combined',
+        action='store_true',
+        help='Generate combined 5x2 loss curves plot (all datasets except moGP, high resolution)'
+    )
+    parser.add_argument(
+        '--dpi',
+        type=int,
+        default=300,
+        help='DPI for high resolution plots (default: 300)'
+    )
     
     args = parser.parse_args()
     
@@ -1475,7 +1940,16 @@ if __name__ == '__main__':
     # --include-gaussian overrides --ignore-gaussian
     ignore_gaussian = not args.include_gaussian
     
-    if args.baseline:
+    if args.loss_curves_combined:
+        # Generate combined 5x2 loss curves plot
+        generate_combined_loss_curves_plot(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian, dpi=args.dpi)
+    elif args.loss_curves:
+        # Generate individual loss curve plots
+        if args.dataset == 'all':
+            generate_loss_curve_plots(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian)
+        else:
+            generate_loss_curve_plots(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian, dataset_key=args.dataset)
+    elif args.baseline:
         generate_all_baseline_plots(outputs_dir, plots_dir)
     elif args.combined:
         generate_combined_plot(outputs_dir, plots_dir, ignore_gaussian=ignore_gaussian)

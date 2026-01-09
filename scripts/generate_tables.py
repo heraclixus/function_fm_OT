@@ -147,6 +147,10 @@ METRIC_HEADERS_ALL = ['Mean', 'Variance', 'Autocorr.', 'Spectrum']
 METRICS_SEQUENCE = ['mean_mse', 'variance_mse', 'autocorrelation_mse']
 METRIC_HEADERS_SEQUENCE = ['Mean', 'Variance', 'Autocorr.']
 
+# Sequence datasets FULL: including skewness and kurtosis
+METRICS_SEQUENCE_FULL = ['mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse', 'autocorrelation_mse']
+METRIC_HEADERS_SEQUENCE_FULL = ['Mean', 'Variance', 'Skewness', 'Kurtosis', 'Autocorr.']
+
 # PDE datasets: no autocorrelation, kurtosis, or skewness (not applicable/meaningful for 2D fields)
 # Use spectrum_mse_log for PDE datasets (log scale is more appropriate for energy spectra)
 METRICS_PDE = ['mean_mse', 'variance_mse', 'spectrum_mse_log']
@@ -319,9 +323,9 @@ def get_best_config_per_category(configs, categories: Dict = KERNEL_CATEGORIES) 
     
     # All metrics we care about
     all_metrics = [
-        'mean_mse', 'variance_mse', 'autocorrelation_mse', 
-        'spectrum_mse', 'spectrum_mse_log', 'density_mse',
-        'convergence_rate'
+        'mean_mse', 'variance_mse', 'skewness_mse', 'kurtosis_mse',
+        'autocorrelation_mse', 'spectrum_mse', 'spectrum_mse_log', 
+        'density_mse', 'convergence_rate'
     ]
     
     # Metrics where higher is better
@@ -854,6 +858,143 @@ def generate_pde_table(outputs_dir: Path = None, output_file: Path = None, ignor
     )
 
 
+def generate_sequence_table_full(outputs_dir: Path = None, output_file: Path = None, ignore_gaussian: bool = True) -> str:
+    """Generate a LaTeX table for sequence datasets with ALL metrics (including skewness, kurtosis)."""
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if output_file is None:
+        output_file = outputs_dir / 'table_sequence_full.tex'
+    
+    return generate_subtable(
+        outputs_dir=outputs_dir,
+        dataset_keys=SEQUENCE_DATASETS,
+        caption='OT kernel comparison for sequence datasets (full metrics). Lower is better. Best is \\textcolor{ForestGreen}{$\\mathbf{green}$}, second best is \\textcolor{Orange}{$\\mathbf{orange}$}.',
+        label='tab:sequence_kernel_full',
+        output_file=output_file,
+        metrics=METRICS_SEQUENCE_FULL,
+        metric_headers=METRIC_HEADERS_SEQUENCE_FULL,
+        ignore_gaussian=ignore_gaussian,
+        higher_is_better=['convergence_rate']
+    )
+
+
+def generate_convergence_rate_table(outputs_dir: Path = None, output_file: Path = None, ignore_gaussian: bool = True) -> str:
+    """
+    Generate a LaTeX table for convergence rate only.
+    Rows are datasets, columns are kernel types, entries are best convergence rate.
+    Higher convergence rate is better.
+    """
+    if outputs_dir is None:
+        script_dir = Path(__file__).parent
+        outputs_dir = script_dir.parent / 'outputs'
+    
+    if output_file is None:
+        output_file = outputs_dir / 'table_convergence_rate.tex'
+    
+    # Collect data from all datasets
+    all_data = {}
+    all_datasets = SEQUENCE_DATASETS + PDE_DATASETS
+    
+    for dataset_key in all_datasets:
+        if dataset_key not in DATASETS:
+            continue
+        best_configs = load_dataset_data(dataset_key, outputs_dir, ignore_gaussian=ignore_gaussian)
+        if best_configs:
+            all_data[dataset_key] = {
+                'title': DATASETS[dataset_key]['title'],
+                'best_configs': best_configs
+            }
+    
+    if not all_data:
+        print("No data found for convergence rate table")
+        return ""
+    
+    # Kernel order (columns)
+    kernel_order = ['Independent', 'Signature', 'RBF', 'Euclidean']
+    if not ignore_gaussian:
+        kernel_order.append('Gaussian')
+    
+    # Build LaTeX table
+    lines = []
+    n_kernels = len(kernel_order)
+    
+    lines.append(r'\begin{table}[t]')
+    lines.append(r'\scriptsize')
+    lines.append(r'\setlength{\tabcolsep}{3pt}')
+    lines.append(r'\centering')
+    lines.append(r'\caption{Convergence rate comparison (higher is better). Best is \textcolor{ForestGreen}{$\mathbf{green}$}, second best is \textcolor{Orange}{$\mathbf{orange}$}.}')
+    lines.append(r'\label{tab:convergence_rate}')
+    lines.append(r'\resizebox{\columnwidth}{!}{%')
+    lines.append(r'\begin{tabular}{l' + 'r' * n_kernels + '}')
+    lines.append(r'\toprule')
+    
+    # Header row: Dataset & kernel names
+    header_kernels = [('N/A' if k == 'Independent' else k) for k in kernel_order]
+    header = 'Dataset & ' + ' & '.join(header_kernels) + r' \\'
+    lines.append(header)
+    lines.append(r'\midrule')
+    
+    # Separate sequence and PDE datasets with midrule
+    seq_keys = [k for k in SEQUENCE_DATASETS if k in all_data]
+    pde_keys = [k for k in PDE_DATASETS if k in all_data]
+    
+    def add_dataset_rows(dataset_keys_subset, add_midrule_after=False):
+        for dataset_key in dataset_keys_subset:
+            data = all_data[dataset_key]
+            dataset_title = data['title']
+            best_configs = data['best_configs']
+            
+            # Get convergence rates for all kernels
+            kernel_values = {}
+            for kernel in kernel_order:
+                if kernel in best_configs:
+                    val = best_configs[kernel]['metrics'].get('convergence_rate')
+                    if val is not None and isinstance(val, (int, float)):
+                        kernel_values[kernel] = val
+            
+            # Compute ranks (higher is better for convergence rate)
+            sorted_kernels = sorted(kernel_values.items(), key=lambda x: x[1], reverse=True)
+            ranks = {k: i + 1 for i, (k, _) in enumerate(sorted_kernels)}
+            
+            # Format values
+            values = []
+            for kernel in kernel_order:
+                if kernel in kernel_values:
+                    val = kernel_values[kernel]
+                    rank = ranks.get(kernel, 0)
+                    formatted = format_value(val, rank=rank if rank <= 2 else 0)
+                else:
+                    formatted = '--'
+                values.append(formatted)
+            
+            row = f'{dataset_title} & ' + ' & '.join(values) + r' \\'
+            lines.append(row)
+        
+        if add_midrule_after and dataset_keys_subset:
+            lines.append(r'\midrule')
+    
+    # Add sequence datasets
+    add_dataset_rows(seq_keys, add_midrule_after=bool(pde_keys))
+    
+    # Add PDE datasets
+    add_dataset_rows(pde_keys, add_midrule_after=False)
+    
+    lines.append(r'\bottomrule')
+    lines.append(r'\end{tabular}')
+    lines.append(r'} % end resizebox')
+    lines.append(r'\end{table}')
+    
+    table_content = '\n'.join(lines)
+    
+    with open(output_file, 'w') as f:
+        f.write(table_content)
+    
+    print(f"Generated: {output_file}")
+    return table_content
+
+
 def generate_all_tables(outputs_dir: Path = None, ignore_gaussian: bool = True) -> None:
     """Generate all tables (full, sequence, PDE)."""
     if outputs_dir is None:
@@ -1330,7 +1471,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--type', '-t',
         type=str,
-        choices=['all', 'full', 'sequence', 'pde', 'compact', 'baseline_seq', 'baseline_pde', 'baseline'],
+        choices=['all', 'full', 'sequence', 'pde', 'compact', 'baseline_seq', 'baseline_pde', 'baseline', 'convergence'],
         default='all',
         help='Type of table to generate (default: all)'
     )
@@ -1346,6 +1487,12 @@ if __name__ == '__main__':
         default=False,
         help='Include Gaussian kernel category (overrides --ignore-gaussian)'
     )
+    parser.add_argument(
+        '--generate-full',
+        action='store_true',
+        default=False,
+        help='Generate tables with all columns (including skewness, kurtosis) for sequence datasets, plus convergence rate table'
+    )
     
     args = parser.parse_args()
     
@@ -1355,7 +1502,24 @@ if __name__ == '__main__':
     # --include-gaussian overrides --ignore-gaussian
     ignore_gaussian = not args.include_gaussian
     
-    if args.type == 'all':
+    if args.generate_full:
+        # Generate full tables with all metrics
+        print("=" * 60)
+        print("Generating Full LaTeX Tables (with all metrics)")
+        if ignore_gaussian:
+            print("(Ignoring Gaussian kernel category)")
+        print("=" * 60)
+        
+        print("\n1. Full sequence table (with skewness, kurtosis)...")
+        generate_sequence_table_full(outputs_dir, ignore_gaussian=ignore_gaussian)
+        
+        print("\n2. Convergence rate table...")
+        generate_convergence_rate_table(outputs_dir, ignore_gaussian=ignore_gaussian)
+        
+        print("\n" + "=" * 60)
+        print("Done!")
+        print("=" * 60)
+    elif args.type == 'all':
         generate_all_tables(outputs_dir, ignore_gaussian=ignore_gaussian)
         # Also generate baseline tables
         print("\n4. Baseline sequence comparison...")
@@ -1377,4 +1541,6 @@ if __name__ == '__main__':
     elif args.type == 'baseline':
         generate_baseline_seq_table(outputs_dir)
         generate_baseline_pde_table(outputs_dir)
+    elif args.type == 'convergence':
+        generate_convergence_rate_table(outputs_dir, output_file, ignore_gaussian=ignore_gaussian)
 

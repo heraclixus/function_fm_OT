@@ -62,17 +62,22 @@ def compute_autocorrelation(samples: torch.Tensor, lag: int = 1) -> torch.Tensor
     Parameters
     ----------
     samples : Tensor, shape (n_samples, n_points)
-        Time series samples
+        Time series samples (1D sequences only, not 2D spatial data)
     lag : int
         Lag for autocorrelation
         
     Returns
     -------
     autocorr : Tensor
-        Mean autocorrelation at the given lag
+        Mean autocorrelation at the given lag, or NaN if input is not 1D sequence data
     """
-    if samples.ndim == 3:
-        samples = samples.squeeze(1)  # Remove channel dim for 1D time series
+    # Handle channel dimension for 1D sequences: (n_samples, 1, n_points) -> (n_samples, n_points)
+    if samples.ndim == 3 and samples.shape[1] == 1:
+        samples = samples.squeeze(1)
+    
+    # If still 3D after squeeze, it's 2D spatial data - autocorrelation doesn't apply
+    if samples.ndim != 2:
+        return torch.tensor(float('nan'))
     
     n_samples, n_points = samples.shape
     
@@ -108,6 +113,7 @@ def compute_all_pointwise_statistics(
     ----------
     real : Tensor
         Real samples, shape (n_samples, n_points) or (n_samples, 1, n_points)
+        For 2D spatial data: (n_samples, H, W) or (n_samples, 1, H, W)
     generated : Tensor
         Generated samples, same shape as real
         
@@ -119,38 +125,79 @@ def compute_all_pointwise_statistics(
         - variance_mse
         - skewness_mse
         - kurtosis_mse
-        - autocorrelation_mse
+        - autocorrelation_mse (None for 2D spatial data)
     """
-    # Handle 3D tensors
-    if real.ndim == 3:
+    # Detect if this is 2D spatial data (e.g., Navier-Stokes)
+    # After removing channel dim, 2D spatial data will be (n_samples, H, W)
+    is_2d_spatial = False
+    
+    # Handle 4D tensors: (n_samples, C, H, W) -> squeeze channel
+    if real.ndim == 4:
         real = real.squeeze(1)
-    if generated.ndim == 3:
+        is_2d_spatial = True
+    if generated.ndim == 4:
         generated = generated.squeeze(1)
+        is_2d_spatial = True
+    
+    # Handle 3D tensors:
+    # - (n_samples, 1, n_points) is 1D data with channel -> squeeze to (n_samples, n_points)
+    # - (n_samples, H, W) with H > 1 is 2D spatial data -> keep as is
+    if real.ndim == 3:
+        if real.shape[1] == 1:
+            real = real.squeeze(1)  # 1D data with channel
+        else:
+            is_2d_spatial = True  # 2D spatial data
+    
+    if generated.ndim == 3:
+        if generated.shape[1] == 1:
+            generated = generated.squeeze(1)
+        else:
+            is_2d_spatial = True
+    
+    # Final safety check: if either tensor is still 3D, it's definitely 2D spatial
+    if real.ndim == 3 or generated.ndim == 3:
+        is_2d_spatial = True
     
     # Ensure float type
     real = real.float()
     generated = generated.float()
     
+    # For 2D spatial data, flatten to (n_samples, H*W) for statistics
+    if is_2d_spatial:
+        real_flat = real.reshape(real.shape[0], -1)
+        generated_flat = generated.reshape(generated.shape[0], -1)
+    else:
+        real_flat = real
+        generated_flat = generated
+    
     # Compute pointwise statistics
-    real_mean = compute_pointwise_mean(real)
-    gen_mean = compute_pointwise_mean(generated)
+    real_mean = compute_pointwise_mean(real_flat)
+    gen_mean = compute_pointwise_mean(generated_flat)
     mean_mse = ((real_mean - gen_mean) ** 2).mean().item()
     
-    real_var = compute_pointwise_variance(real)
-    gen_var = compute_pointwise_variance(generated)
+    real_var = compute_pointwise_variance(real_flat)
+    gen_var = compute_pointwise_variance(generated_flat)
     variance_mse = ((real_var - gen_var) ** 2).mean().item()
     
-    real_skew = compute_pointwise_skewness(real)
-    gen_skew = compute_pointwise_skewness(generated)
+    real_skew = compute_pointwise_skewness(real_flat)
+    gen_skew = compute_pointwise_skewness(generated_flat)
     skewness_mse = np.mean((real_skew - gen_skew) ** 2)
     
-    real_kurt = compute_pointwise_kurtosis(real)
-    gen_kurt = compute_pointwise_kurtosis(generated)
+    real_kurt = compute_pointwise_kurtosis(real_flat)
+    gen_kurt = compute_pointwise_kurtosis(generated_flat)
     kurtosis_mse = np.mean((real_kurt - gen_kurt) ** 2)
     
-    real_autocorr = compute_autocorrelation(real)
-    gen_autocorr = compute_autocorrelation(generated)
-    autocorrelation_mse = ((real_autocorr - gen_autocorr) ** 2).item()
+    # Autocorrelation only makes sense for 1D sequential data
+    if is_2d_spatial:
+        autocorrelation_mse = None
+    else:
+        real_autocorr = compute_autocorrelation(real_flat)
+        gen_autocorr = compute_autocorrelation(generated_flat)
+        # Handle NaN (returned when data is not valid for autocorrelation)
+        if torch.isnan(real_autocorr) or torch.isnan(gen_autocorr):
+            autocorrelation_mse = None
+        else:
+            autocorrelation_mse = ((real_autocorr - gen_autocorr) ** 2).item()
     
     return {
         'mean_mse': mean_mse,
@@ -177,7 +224,7 @@ def compute_power_spectrum_1d(
     Parameters
     ----------
     samples : Tensor, shape (n_samples, n_points)
-        Time series samples
+        Time series samples (1D sequences only)
     fs : float
         Sampling frequency
     method : str
@@ -191,9 +238,21 @@ def compute_power_spectrum_1d(
         Frequency values
     psd : ndarray
         Average power spectral density
+        
+    Raises
+    ------
+    ValueError
+        If input is 2D spatial data (3D tensor after squeeze)
     """
-    if samples.ndim == 3:
+    # Handle channel dimension for 1D sequences: (n_samples, 1, n_points) -> (n_samples, n_points)
+    if samples.ndim == 3 and samples.shape[1] == 1:
         samples = samples.squeeze(1)
+    
+    # If still 3D, it's 2D spatial data - not valid for 1D spectrum
+    if samples.ndim != 2:
+        raise ValueError(f"compute_power_spectrum_1d expects 2D input (n_samples, n_points), "
+                        f"got {samples.ndim}D tensor with shape {samples.shape}. "
+                        f"Use compute_energy_spectrum_2d for 2D spatial data.")
     
     samples_np = samples.cpu().numpy()
     n_samples, n_points = samples_np.shape
@@ -533,7 +592,7 @@ def extract_seasonal_component(
     Parameters
     ----------
     samples : Tensor, shape (n_samples, n_points)
-        Time series samples
+        Time series samples (1D sequences only)
     period : int, optional
         Expected period. If None, will be estimated from data.
         
@@ -543,9 +602,21 @@ def extract_seasonal_component(
         Average seasonal pattern
     residual_var : Tensor
         Variance of residuals after removing seasonal component
+        
+    Raises
+    ------
+    ValueError
+        If input is 2D spatial data (3D tensor after squeeze)
     """
-    if samples.ndim == 3:
+    # Handle channel dimension for 1D sequences: (n_samples, 1, n_points) -> (n_samples, n_points)
+    if samples.ndim == 3 and samples.shape[1] == 1:
         samples = samples.squeeze(1)
+    
+    # If still 3D, it's 2D spatial data - seasonal patterns don't apply
+    if samples.ndim != 2:
+        raise ValueError(f"extract_seasonal_component expects 2D input (n_samples, n_points), "
+                        f"got {samples.ndim}D tensor with shape {samples.shape}. "
+                        f"Seasonal analysis is not applicable to 2D spatial data.")
     
     n_samples, n_points = samples.shape
     
