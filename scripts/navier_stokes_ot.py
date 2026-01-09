@@ -68,7 +68,7 @@ parser.add_argument('--dpath', type=str, default='../data/ns.mat')
 parser.add_argument('--spath', type=str, default='../outputs/navier_stokes_ot/')
 parser.add_argument('--ntr', type=int, default=20000, help='Training samples')
 parser.add_argument('--subsample_time', type=int, default=5, help='Time subsampling')
-parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
+parser.add_argument('--epochs', type=int, default=300, help='Training epochs (default: 300)')
 parser.add_argument('--n_seeds', type=int, default=3, help='Number of random seeds')
 parser.add_argument('--bs', help='Batch size', type=int, default=512)
 parser.add_argument('--load-only', action='store_true', help='Load saved results instead of training')
@@ -80,6 +80,10 @@ parser.add_argument('--seed', type=int, default=None,
 parser.add_argument('--list-configs', action='store_true', help='List available configurations and exit')
 parser.add_argument('--config-file', type=str, default=None,
                     help='Path to a YAML or JSON file containing OT configurations')
+parser.add_argument('--run-best', action='store_true', default=True,
+                    help='Run only the best config (euclidean_sinkhorn_reg0.5) - enabled by default')
+parser.add_argument('--run-all', action='store_true',
+                    help='Run all OT configurations (overrides --run-best)')
 parser.add_argument('--modes', type=int, default=None,
                     help='Override FNO modes (default: 16)')
 parser.add_argument('--kernel-length', type=float, default=None,
@@ -142,7 +146,18 @@ torch.save(ground_truth[:1000], spath / 'ground_truth.pt')
 # OT Configurations (2D - no signature kernel)
 # =============================================================================
 
-OT_CONFIGS = {
+# Best config based on spectrum_mse_log from hyperparameter search
+BEST_CONFIG = {
+    "euclidean_sinkhorn_reg0.5": {
+        "use_ot": True,
+        "ot_method": "sinkhorn",
+        "ot_reg": 0.5,
+        "ot_kernel": "euclidean",
+        "ot_coupling": "sample",
+    },
+}
+
+OT_CONFIGS_ALL = {
     # =========================================================================
     # Baseline: Independent pairing (no OT)
     # =========================================================================
@@ -277,7 +292,11 @@ def load_configs_from_file(file_path: Path) -> Dict:
 
 def get_all_configs() -> Dict:
     """Get all OT configurations, merging built-in with external if provided."""
-    configs = dict(OT_CONFIGS)
+    # Use all configs if --run-all, otherwise use best config only
+    if args.run_all:
+        configs = dict(OT_CONFIGS_ALL)
+    else:
+        configs = dict(BEST_CONFIG)
     if args.config_file:
         external_configs = load_configs_from_file(Path(args.config_file))
         configs.update(external_configs)
