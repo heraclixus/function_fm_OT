@@ -10,11 +10,6 @@ Standard FFM uses independent sampling between data functions and GP noise. We i
 - **RBF**: Radial basis function kernel distance
 - **Signature**: Signature kernel for time series (captures path geometry)
 
-## Installation
-
-```bash
-pip install torch torchdiffeq gpytorch linear_operator scipy POT signatory
-```
 
 ## Project Structure
 
